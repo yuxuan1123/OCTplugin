@@ -1,0 +1,14 @@
+2026/09/15 13:57:20 [kernel] plugin color_pick started
+2026/09/15 13:57:20 [kernel] plugin conversion started
+2026/09/15 13:57:20 [kernel] plugin demo_hello started
+2026/09/15 13:57:20 [kernel] plugin demo_js started
+2026/09/15 13:57:20 [kernel] plugin demo_np1 started
+2026/09/15 13:57:20 [kernel] plugin demo_np2 started
+2026/09/15 13:57:20 [kernel] plugin demo_web started
+2026/09/15 13:57:20 [kernel] plugin home started
+2026/09/15 13:57:20 [kernel] plugin md started
+2026/09/15 13:57:20 [kernel] plugin merge started
+2026/09/15 13:57:20 [kernel] plugin translation started
+2026/09/15 13:57:20 [kernel] plugin tree started
+2026/09/15 13:57:25 [ws] connected from 127.0.0.1:55776
+2026/09/15 13:57:27 [ws] closed: read tcp 127.0.0.1:55775->127.0.0.1:55776: wsarecv: An existing connection was forcibly closed by the remote host.

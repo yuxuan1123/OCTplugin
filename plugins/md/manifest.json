@@ -1,0 +1,23 @@
+{
+  "id": "md",
+  "name": "Markdown",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": ["file_read", "file_write"],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "md.ping", "method": "ping", "desc": "Markdown 后端桥连通性" },
+    { "name": "md.list", "method": "md.list", "desc": "扫描 md 目录，返回 {dir,count,files:[{name,path,size,title,...}]}" },
+    { "name": "md.read", "method": "md.read", "desc": "按路径读取 Markdown 文本返回 {content}" },
+    { "name": "md.save", "method": "md.save", "desc": "按路径写回 Markdown 文本，{ok:true} 或 {ok:false,error}" },
+    { "name": "md.create", "method": "md.create", "desc": "在 md 目录新建文件并打开，返回 {path}" },
+    { "name": "md.delete", "method": "md.delete", "desc": "删除文件（快捷方式删本体），{ok:true}" },
+    { "name": "md.rename", "method": "md.rename", "desc": "同目录内重命名，返回 {path,name}" },
+    { "name": "md.setDir", "method": "md.setDir", "desc": "切换 md 工作目录并持久化，返回 {dir}" },
+    { "name": "md.getDir", "method": "md.getDir", "desc": "读取当前 md 工作目录，返回 {dir}" }
+  ]
+}

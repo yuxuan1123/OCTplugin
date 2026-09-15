@@ -1,0 +1,31 @@
+{
+  "id": "demo_hello",
+  "name": "Hello 示例",
+  "type": "Python",
+  "entry": "main.py",
+  "python_version": "3.12",
+  "ui_mode": "stdio",
+  "load_mode": "always",
+  "permissions": ["file_read", "network"],
+  "dependencies": [
+    { "path": "requirements.txt", "manager": "uv", "explicit": false }
+  ],
+  "commands": [
+    {
+      "name": "/hello",
+      "desc": "向 demo 插件问好",
+      "method": "hello",
+      "params": [
+        { "name": "name", "type": "string" }
+      ]
+    },
+    {
+      "name": "/readfile",
+      "desc": "请求内核读取文件（演示 file_read 权限门）",
+      "method": "readfile",
+      "params": [
+        { "name": "path", "type": "string" }
+      ]
+    }
+  ]
+}

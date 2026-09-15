@@ -1,0 +1,16 @@
+{
+  "id": "demo_js",
+  "name": "Demo JS",
+  "version": "0.1.0",
+  "type": "JavaScript",
+  "entry": "index.js",
+  "load_mode": "always",
+  "lang": "js",
+  "permissions": [],
+  "commands": [
+    { "name": "/today", "desc": "返回当前日期（luxon，Node 隔离环境）", "method": "today" }
+  ],
+  "dependencies": [
+    { "manager": "npm", "path": "package.json" }
+  ]
+}

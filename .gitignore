@@ -1,0 +1,42 @@
+# ---- 构建产物 ----
+*.exe
+*.dll
+*.so
+*.dylib
+*.node
+host/dist/
+host/out/
+kernel/bin/
+
+# ---- 运行时 ----
+deps/
+store/
+logs/
+runtime/
+
+# ---- Node ----
+node_modules/
+host/node_modules/
+
+# ---- Go ----
+kernel/*.exe
+coverage.out
+
+# ---- Python / uv ----
+.venv/
+plugins/*/.venv/
+__pycache__/
+*.pyc
+uv.lock
+.python-version
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ---- 工具 / 环境偏移 ----
+.env
+.local

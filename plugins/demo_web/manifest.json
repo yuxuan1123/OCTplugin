@@ -1,0 +1,17 @@
+{
+  "id": "demo_web",
+  "name": "Web Demo（iframe 桥验证）",
+  "version": "0.1.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": [],
+  "dependencies": [],
+  "commands": [
+    { "name": "/webhello", "desc": "demo_web 后端问候（bridge 验证）", "method": "hello" }
+  ],
+  "functions": [
+    { "name": "web.hello", "method": "hello", "desc": "返回当前时间戳与进程标识" }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "id": "tree",
+  "name": "目录树",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": [],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "tree.ping", "method": "ping", "desc": "目录树桥连通性探测" },
+    { "name": "tree.scan", "method": "tree.scan", "desc": "按绝对路径用 os.walk 扫描生成目录树文本 {root,maxDepth,ignoreHidden}" }
+  ]
+}

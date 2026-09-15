@@ -1,0 +1,2 @@
+# uv 全局偏好（D3/D4）：只用托管 Python，绝不回退系统 Python
+python-preference = "only-managed"

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>取色器</title>
+  <link rel="stylesheet" href="/res/theme/plugin.css" />
+  <style>
+    /* ══ 取色器 · 国风墨水 ══
+       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+    html{ height:100%; overflow:hidden; }
+    body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden;
+      padding:22px; background:transparent; color:var(--ink); font-family:var(--font); }
+
+    .card{ flex:0 0 auto; }
+    .card h3{ display:flex; align-items:center; gap:8px; }
+    .card h3 .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+
+    /* 选择颜色行 */
+    .pick-row{ display:flex; align-items:center; gap:14px; }
+    #picker-btn{ flex:0 0 160px; height:40px; border-radius:9px; border:none; cursor:pointer;
+      font-family:var(--font); font-weight:700; letter-spacing:2px; font-size:14px; }
+    .cur{ color:var(--ink-soft); font-size:13px; letter-spacing:1px; }
+    .cur-hex{ font-family:Consolas,'Courier New',monospace; cursor:pointer; color:var(--ink);
+      background:rgba(255,252,245,.55); border:1px solid var(--line); border-radius:6px;
+      padding:3px 8px; }
+    .cur-hex:hover{ border-color:var(--gold); }
+    .swatch{ width:60px; height:30px; border:1px solid #888; border-radius:6px; background:#000; }
+
+    /* 格式列表 */
+    .fmt-row{ display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+    .fmt-row:last-child{ border-bottom:none; }
+    .fmt-name{ flex:0 0 120px; font-size:13px; color:var(--ink-soft); letter-spacing:1px; }
+    .fmt-val{ flex:1; background:var(--code); border:1px solid var(--line); border-radius:8px;
+      padding:8px 12px; font-family:Consolas,'Courier New',monospace; font-size:13px; cursor:pointer;
+      color:#3a352c; transition:border-color .15s; }
+    .fmt-val:hover{ border-color:var(--gold); }
+
+    /* 手动转换 */
+    .input-row{ display:flex; gap:10px; margin-top:12px; }
+    .input-row input{ flex:1; background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:9px 12px; color:var(--ink); font-family:var(--font); font-size:14px; outline:none; }
+    .input-row input:focus{ border-color:var(--gold); }
+    .sub{ color:var(--ink-soft); font-size:12px; letter-spacing:1px; }
+
+    /* Toast（墨黑底） */
+    .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
+      background:var(--ink); color:#FBF7EE; padding:9px 16px; border-radius:20px;
+      font-size:12px; letter-spacing:.5px; opacity:0; transition:opacity .25s;
+      pointer-events:none; z-index:99; }
+    .toast.show{ opacity:1; }
+
+    /* ── 页面内置取色器（跨源 iframe 内原生 color input 的弹窗被 Chromium 拦截，
+          故自绘 HSV 取色板，完全在 iframe 内运行，绝对可靠） ── */
+    .p-overlay{ position:fixed; inset:0; z-index:200; display:flex; align-items:center;
+      justify-content:center; background:rgba(30,27,23,.35); backdrop-filter:blur(2px); }
+    .p-overlay[hidden]{ display:none; }
+    .p-dialog{ width:min(300px,88vw); background:var(--card); border:1px solid var(--line);
+      border-radius:16px; box-shadow:var(--shadow); padding:18px; }
+    .p-dialog h3{ margin:0 0 14px; font-size:14px; letter-spacing:3px; font-weight:700;
+      padding-left:10px; border-left:3px solid var(--gold); }
+    .p-sabox{ position:relative; width:100%; aspect-ratio:4/3; border-radius:10px;
+      overflow:hidden; box-shadow:inset 0 0 0 1px var(--line); cursor:crosshair; }
+    .p-sabox canvas{ width:100%; height:100%; display:block; }
+    .p-sabox .dot{ position:absolute; width:14px; height:14px; border-radius:50%;
+      border:2px solid #fff; box-shadow:0 0 0 1px rgba(30,27,23,.55), 0 1px 4px rgba(30,27,23,.4);
+      transform:translate(-50%,-50%); pointer-events:none; }
+    .p-hue{ position:relative; width:100%; height:14px; margin-top:14px; border-radius:7px;
+      overflow:hidden; box-shadow:inset 0 0 0 1px var(--line); cursor:pointer; }
+    .p-hue canvas{ width:100%; height:100%; display:block; }
+    .p-hue .thumb{ position:absolute; width:10px; height:100%; border-radius:4px; border:2px solid #fff;
+      box-shadow:0 0 0 1px rgba(30,27,23,.55); transform:translateX(-50%); pointer-events:none; }
+    .p-preview{ display:flex; align-items:center; gap:10px; margin-top:14px; }
+    .p-preview .sw{ width:52px; height:30px; border-radius:7px; border:1px solid var(--line); }
+    .p-preview .px{ flex:1; font-family:Consolas,'Courier New',monospace; font-size:14px;
+      color:var(--ink); letter-spacing:1px; }
+    .p-actions{ display:flex; gap:10px; margin-top:16px; }
+    .p-actions .btn{ flex:1; }
+
+    /* ── 全屏取色（后端抓整屏 → 前端渲染拾取） ── */
+    .fs-overlay{ position:fixed; inset:0; z-index:300; display:flex; align-items:center;
+      justify-content:center; background:rgba(15,14,12,.66); }
+    .fs-overlay[hidden]{ display:none; }
+    .fs-stage{ position:relative; width:100%; height:100%; display:flex;
+      align-items:center; justify-content:center; cursor:crosshair; }
+    #fs-canvas{ display:block; box-shadow:0 10px 34px rgba(0,0,0,.5);
+      border-radius:6px; user-select:none; }
+    #fs-mag{ position:absolute; width:100px; height:100px; border-radius:50%;
+      border:2px solid #fff; box-shadow:0 0 0 1.5px rgba(0,0,0,.5), 0 6px 18px rgba(0,0,0,.4);
+      pointer-events:none; background:#000; z-index:3; }
+    .fs-bubble{ position:absolute; transform:translate(-50%,-150%);
+      background:var(--ink); color:#FBF7EE; padding:3px 9px; border-radius:10px;
+      font:12px Consolas,'Courier New',monospace; letter-spacing:1px; pointer-events:none;
+      z-index:4; box-shadow:0 2px 8px rgba(0,0,0,.35); white-space:nowrap; }
+    .fs-hint{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+      background:rgba(30,27,23,.85); color:#FBF7EE; padding:6px 14px; border-radius:16px;
+      font-size:12px; letter-spacing:.5px; z-index:4; }
+    .fs-actions{ position:fixed; right:18px; bottom:16px; z-index:4; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h3><span class="dot"></span>选择颜色</h3>
+    <div class="pick-row">
+      <button id="picker-btn">点击选择颜色</button>
+      <button class="btn" id="screen-btn">全屏取色</button>
+      <span class="cur">当前颜色：</span>
+      <div class="swatch" id="swatch"></div>
+      <span class="cur cur-hex" id="cur-hex" title="右键复制十六进制"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot"></span>颜色格式（点击值复制）</h3>
+    <div id="fmt-list"></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot"></span>手动转换</h3>
+    <div class="sub">支持 #RRGGBB 或 rgb(R,G,B)</div>
+    <div class="input-row">
+      <input id="input" type="text" placeholder="例如 #FF6600 或 rgb(255,102,0)" />
+      <button class="btn" id="convert-btn">转换并更新</button>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- 全屏取色：把后端抓取的整屏渲染出来，跨插件范围取任意像素 -->
+  <div class="fs-overlay" id="fs-overlay" hidden>
+    <div class="fs-stage" id="fs-stage">
+      <canvas id="fs-canvas"></canvas>
+      <canvas id="fs-mag" width="220" height="220"></canvas>
+      <div class="fs-bubble" id="fs-bubble"></div>
+    </div>
+    <div class="fs-hint">整屏取色：移动拾取 · 单击所选 · Esc 取消</div>
+    <div class="fs-actions">
+      <button class="btn ghost" id="fs-cancel">取消</button>
+    </div>
+  </div>
+
+  <!-- 页面内置取色器 -->
+  <div class="p-overlay" id="p-overlay" hidden>
+    <div class="p-dialog">
+      <h3>选择颜色</h3>
+      <div class="p-sabox" id="p-sabox">
+        <canvas id="sa-box" width="400" height="300"></canvas>
+        <div class="dot" id="p-dot"></div>
+      </div>
+      <div class="p-hue" id="p-hue">
+        <canvas id="hue-bar" width="400" height="20"></canvas>
+        <div class="thumb" id="p-thumb"></div>
+      </div>
+      <div class="p-preview">
+        <div class="sw" id="p-swatch"></div>
+        <div class="px" id="p-hex"></div>
+      </div>
+      <div class="p-actions">
+        <button class="btn ghost" id="p-cancel">取消</button>
+        <button class="btn" id="p-ok">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "id": "translation",
+  "name": "翻译",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": ["net"],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "translation.ping", "method": "ping", "desc": "翻译桥连通性" },
+    { "name": "translation.translate", "method": "translation.translate", "desc": "文本翻译 → { source, text }" },
+    { "name": "translation.langs", "method": "translation.langs", "desc": "支持的目标语种列表" }
+  ]
+}

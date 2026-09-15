@@ -1,0 +1,9 @@
+{
+  "name": "demo-js",
+  "version": "0.1.0",
+  "type": "commonjs",
+  "dependencies": {
+    "luxon": "^3.4.4"
+  },
+  "allowScripts": []
+}

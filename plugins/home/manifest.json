@@ -1,0 +1,18 @@
+{
+  "id": "home",
+  "name": "首页",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": ["file_read", "exec"],
+  "dependencies": [],
+  "commands": [
+    { "name": "/clockin", "desc": "打卡（am/pm）", "method": "clockin", "params": [{ "name": "slot", "type": "string" }] },
+    { "name": "/workmode", "desc": "一键工作模式脚本", "method": "workmode" }
+  ],
+  "functions": [
+    { "name": "home.state", "method": "state", "desc": "打卡/工作模式/网络/任务综合状态" }
+  ]
+}

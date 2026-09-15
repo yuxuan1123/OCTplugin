@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Web Demo</title>
+  <style>
+    :root{--paper:#f3ecdd;--ink:#1e1b17;--ink-soft:#5c564c;--cinnabar:#b23a30;--gold:#a8875a;--line:rgba(30,27,23,.14)}
+    *{box-sizing:border-box}
+    body{margin:0;padding:18px;background:var(--paper);color:var(--ink);font-family:'LXGW WenKai','KaiTi',serif}
+    h2{margin:0 0 12px;font-size:15px;letter-spacing:2px;padding-left:10px;border-left:3px solid var(--cinnabar)}
+    label{display:block;color:var(--ink-soft);font-size:12px;letter-spacing:1px;margin:8px 0 4px}
+    input{width:100%;background:rgba(255,252,245,.5);border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--ink)}
+    button{color:#FBF6EC;background:var(--cinnabar);border:none;border-radius:8px;padding:8px 16px;font-weight:700;letter-spacing:2px;cursor:pointer;margin-top:8px}
+    button:hover{filter:brightness(1.08)}
+    pre{background:#eae1d1;padding:10px;border-radius:8px;font-size:12px;overflow:auto;margin-top:10px}
+  </style>
+</head>
+<body>
+  <h2>Web Demo · iframe 桥验证</h2>
+  <label>姓名</label>
+  <input id="name" type="text" placeholder="OCTplugin" />
+  <div><button id="go">调用后端 hello</button></div>
+  <pre id="out">等待…</pre>
+
+  <script src="app.js"></script>
+  <script>
+    const out = document.getElementById("out");
+    document.getElementById("go").onclick = async () => {
+      try {
+        const r = await window.OCT.callPlugin("demo_web", "hello", { name: document.getElementById("name").value || "OCTplugin" });
+        out.textContent = "ok: " + JSON.stringify(r.result, null, 2);
+      } catch (e) { out.textContent = "失败: " + e.message + (e.data ? " " + JSON.stringify(e.data) : ""); }
+    };
+    document.getElementById("out").textContent = "插件页已加载，等待宿主握手…";
+    window.addEventListener("oct.ready", () => { out.textContent = "桥已连通，可调用后端。"; });
+    window.addEventListener("oct.error", (e) => { out.textContent = "桥错误: " + e.detail; });
+  </script>
+</body>
+</html>

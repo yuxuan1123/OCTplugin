@@ -1,0 +1,15 @@
+{
+  "id": "conversion",
+  "name": "转换",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": [],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "conversion.ping", "method": "ping", "desc": "转换页桥连通性" }
+  ]
+}

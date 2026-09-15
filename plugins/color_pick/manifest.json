@@ -1,0 +1,17 @@
+{
+  "id": "color_pick",
+  "name": "取色器",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": [],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "color_pick.ping", "method": "ping", "desc": "取色器桥连通性" },
+    { "name": "colorpick.screen", "method": "colorpick.screen", "desc": "抓取整块屏幕返回 BMP base64（全屏取色）" },
+    { "name": "colorpick.eyedrop", "method": "colorpick.eyedrop", "desc": "原生全屏实时吸管取色" }
+  ]
+}

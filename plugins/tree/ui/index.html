@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>目录树</title>
+  <link rel="stylesheet" href="/res/theme/plugin.css" />
+  <style>
+    /* ══ 目录树 · 国风墨水 ══
+       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+    html{ height:100%; overflow:hidden; }
+    body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden;
+      padding:22px; background:transparent; color:var(--ink); font-family:var(--font);
+      display:flex; flex-direction:column; }
+    .card{ flex:0 0 auto; }
+
+    /* ── 根目录选择 ── */
+    .pick-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .pick-row input.path{ flex:1; min-width:200px; background:rgba(255,252,245,.55);
+      border:1px solid var(--line); border-radius:9px; padding:9px 12px; color:var(--ink);
+      font-family:var(--font); font-size:14px; outline:none; }
+    .pick-row input.path:focus{ border-color:var(--gold); }
+    .folder-name{ flex:1 1 100%; color:var(--ink-soft); font-size:13px; letter-spacing:1px;
+      word-break:break-all; margin-top:2px; }
+
+    /* ── 选项网格 ── */
+    .opts{ display:grid; grid-template-columns:1fr 1fr; gap:12px 18px; margin-top:12px; }
+    @media (max-width:700px){ .opts{ grid-template-columns:1fr; } }
+    .opt label{ display:block; color:var(--ink-soft); font-size:12px; letter-spacing:1px; margin-bottom:6px; }
+    .opt input[type=text], .opt input[type=number], .opt select{
+      width:100%; background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:8px 11px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none; }
+    .opt input:focus, .opt select:focus{ border-color:var(--gold); }
+    .check-row{ display:flex; align-items:center; gap:8px; color:var(--ink); font-size:13px; }
+    .check-row input{ accent-color:var(--gold); }
+    .check-row.hint{ color:var(--ink-faint); font-size:12px; }
+
+    /* ── 动作行 ── */
+    .action-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+    /* ── 输出区（策略 A：内部滚动） ── */
+    .card.out{ flex:1 1 auto; display:flex; flex-direction:column; min-height:180px; }
+    .card.out .code{ flex:1 1 auto; white-space:pre; overflow:auto; min-height:120px; }
+    .stat{ color:var(--ink-faint); font-size:12px; letter-spacing:1px; margin-top:8px; }
+
+    /* Toast（墨黑底） */
+    .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
+      background:var(--ink); color:#FBF7EE; padding:9px 16px; border-radius:20px;
+      font-size:12px; letter-spacing:.5px; opacity:0; transition:opacity .25s;
+      pointer-events:none; z-index:99; }
+    .toast.show{ opacity:1; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h3><span class="dot"></span>目录树选项</h3>
+    <div class="pick-row">
+      <button class="btn" id="folder-btn">选择文件夹…</button>
+      <input type="text" id="path" class="path" placeholder="或输入根目录绝对路径（走后端 os.walk 扫描）" />
+      <button class="btn ghost" id="scan-btn">路径扫描</button>
+      <div class="folder-name" id="folder-name">尚未选择文件夹（推荐用“选择文件夹”走纯前端构建）</div>
+      <input type="file" id="dir-input" webkitdirectory directory style="display:none" />
+    </div>
+    <div class="opts">
+      <div class="opt"><label>最大深度（0 = 不限）</label>
+        <input type="number" id="depth" value="0" min="0" max="99" /></div>
+      <div class="opt"><label>文件过滤</label>
+        <select id="filter">
+          <option value="none">显示所有文件（默认）</option>
+          <option value="all">仅显示目录</option>
+          <option value="images">隐藏图片文件</option>
+        </select></div>
+      <div class="opt"><label>排除扩展名（逗号分隔，如 .log,.tmp）</label>
+        <input type="text" id="exclude-ext" placeholder="示例：.log,.tmp,md" /></div>
+      <div class="opt"><label>排除关键词（逗号分隔，如 __pycache__）</label>
+        <input type="text" id="exclude-kw" placeholder="示例：__pycache__,node_modules" /></div>
+      <div class="check-row"><input type="checkbox" id="show-hidden" /> 显示隐藏项（名称以 . 开头）</div>
+      <div class="check-row hint">提示：通配匹配用“排除关键词”覆盖，简单直接。</div>
+    </div>
+  </div>
+
+  <div class="card out">
+    <h3><span class="dot"></span>目录树</h3>
+    <div class="action-row">
+      <button class="btn" id="gen-btn">生成目录树</button>
+      <button class="btn ghost" id="copy-btn">复制为文本</button>
+    </div>
+    <div class="stat muted" id="stat">尚未生成。</div>
+    <pre class="code" id="out"></pre>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>OCTplugin · 墨韵工作台</title>
+  <style>
+    /* ── 国风墨水 · 宣纸与夜墨 ── */
+    :root {
+      --paper:#f3ecdd; --paper-2:#e9e0cb;
+      --ink:#1e1b17; --ink-soft:#5c564c; --ink-faint:#8d8578;
+      --cinnabar:#b23a30; --cinnabar-soft:#c9604f;
+      --celadon:#4a6b73; --gold:#a8875a;
+      --line:rgba(30,27,23,.14); --card-line:rgba(30,27,23,.1);
+      --card:rgba(255,252,245,.5);
+      --shadow:0 10px 30px -18px rgba(30,27,23,.45);
+      --grain-opacity:.38; --grain-blend:multiply;
+      --code:#eae1d1;
+    }
+    * { box-sizing:border-box; }
+    html,body { height:100%; }
+    body {
+      margin:0; color:var(--ink); overflow:hidden; display:flex; flex-direction:column;
+      font-family:'LXGW WenKai','STKaiti','KaiTi','Kaiti SC','STSong','Songti SC',
+        'Source Han Serif SC','Noto Serif CJK SC','SimSun',serif;
+      background:var(--paper); -webkit-font-smoothing:antialiased;
+    }
+    body::before {
+      content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+      background:
+        radial-gradient(60% 45% at 15% 12%, rgba(74,107,115,.10), transparent 70%),
+        radial-gradient(50% 40% at 88% 20%, rgba(178,58,48,.07), transparent 70%),
+        radial-gradient(70% 50% at 50% 105%, rgba(30,27,23,.10), transparent 70%);
+    }
+    body::after {
+      content:''; position:fixed; inset:0; z-index:1; pointer-events:none;
+      opacity:var(--grain-opacity); mix-blend-mode:var(--grain-blend);
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+    }
+    header, .shell, .panel { position:relative; z-index:2; }
+
+    /* ── 顶栏（无边框窗口的拖拽区） ── */
+    header {
+      padding:12px 22px; display:flex; align-items:center; gap:14px;
+      border-bottom:1px solid var(--line); flex:none;
+      background:color-mix(in srgb, var(--paper) 72%, transparent); backdrop-filter:blur(6px);
+      -webkit-app-region:drag; user-select:none;
+    }
+    .brand { font-size:13px; font-weight:700; letter-spacing:4px; color:var(--ink); flex:1;
+      display:flex; align-items:center; gap:10px; }
+    header .brand img { height:22px; width:22px; cursor:pointer; -webkit-app-region:no-drag; }
+    header .brand img:hover{ opacity:.8; }
+    /* 点击 logo 隐藏/展开左侧栏 */
+    body.side-collapsed .side{ display:none; }
+    header .brand .seal { color:var(--cinnabar); }
+    .clock { text-align:right; }
+    .clock b { font-size:20px; letter-spacing:2px; }
+    /* 自绘窗口控制（不可拖拽，避免被 app-region 吞点击） */
+    .win-controls { display:flex; gap:2px; -webkit-app-region:no-drag; margin-left:6px; }
+    .win-controls button {
+      width:38px; height:30px; border:none; background:transparent; cursor:pointer;
+      font-size:13px; line-height:1; color:var(--ink-soft); border-radius:7px;
+      display:inline-flex; align-items:center; justify-content:center; padding:0;
+      font-family:var(--font);
+    }
+    .win-controls button:hover { background:var(--card); color:var(--ink); }
+    .win-controls button svg { width:14px; height:14px; display:block; pointer-events:none; }
+    .win-controls button.min:before{ content:'—'; }
+    .win-controls button.max .m{ width:10px; height:10px; border:1.4px solid currentColor; border-radius:2px; display:block; }
+    .win-controls button.max .r{ display:none; }
+    .win-controls button.max.restore .m{ display:none; }
+    .win-controls button.max.restore .r{ display:block; width:10px; height:10px; border:1.4px solid currentColor; border-radius:2px; position:relative; }
+    .win-controls button.max.restore .r:before{ content:''; position:absolute; width:10px; height:10px; border:1.4px solid currentColor; border-radius:2px; left:-4px; top:-4px; background:var(--paper); }
+    .win-controls button.close:hover { background:var(--cinnabar); color:#FBF7EE; }
+    .clock span { display:block; color:var(--ink-faint); font-size:11px; letter-spacing:2px; }
+    .status { padding:3px 12px; border-radius:999px; font-size:12px; font-weight:700;
+      border:1px solid var(--card-line); background:var(--card); }
+    .ok { color:var(--celadon); } .err { color:var(--cinnabar); } .pending { color:var(--ink-soft); }
+
+    /* ── 三区：左栏 + 右侧 ── */
+    .shell { display:flex; flex:1; min-height:0; }
+
+    /* 左侧导航 */
+    .side {
+      width:200px; flex:none; border-right:1px solid var(--line); padding:20px 10px;
+      display:flex; flex-direction:column; gap:8px; overflow-y:auto;
+    }
+    .side .nav-title { color:var(--ink-faint); font-size:11px; letter-spacing:3px; padding:0 8px 8px; }
+    .side-btn {
+      display:flex; align-items:center; gap:10px; padding:11px 14px; cursor:pointer;
+      color:var(--ink-soft); font-size:14px; letter-spacing:3px; border-radius:10px; font-family:inherit;
+      border:1px solid transparent; background:transparent; transition:all .22s ease;
+    }
+    .side-btn .dot { width:7px; height:7px; border-radius:99px; background:var(--ink-faint); transition:all .22s ease; }
+    .side-btn:hover { color:var(--ink); background:rgba(255,252,245,.5); }
+    .side-btn.active { color:var(--ink); font-weight:700;
+      background:var(--card); border-color:var(--card-line); box-shadow:var(--shadow);
+      border-left:3px solid var(--cinnabar); padding-left:12px; }
+    .side-btn.active .dot { background:var(--cinnabar); }
+
+    /* 右侧内容 */
+    .main { flex:1; min-width:0; min-height:0; overflow-y:auto; padding:24px; position:relative; }
+    .panel { display:none; }
+    .panel.active { display:block; animation:fade .25s ease; }
+    /* 插件面板：绝对定位填满 .main 的内容盒（等效原生面板占满右侧，不依赖 JS/内联高度） */
+    .panel.plugin-panel.active {
+      display:flex;
+      position:absolute; left:24px; right:24px; top:24px; bottom:24px;
+    }
+    .panel.plugin-panel.active iframe {
+      flex:1; min-height:0; width:100%; height:100%;
+      border:none; border-radius:14px; background:transparent; display:block;
+    }
+    @keyframes fade { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:none;} }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+
+    .card { background:var(--card); border:1px solid var(--card-line); border-radius:16px;
+      padding:20px 24px; box-shadow:var(--shadow); backdrop-filter:blur(3px);
+      transition:transform .3s cubic-bezier(.22,1,.36,1), border-color .3s ease; }
+    .card:hover { transform:translateY(-2px); }
+    .card h2 { margin:0 0 14px; font-size:15px; font-weight:700; letter-spacing:2px; color:var(--ink);
+      padding-left:10px; border-left:3px solid var(--cinnabar); }
+    label { display:block; color:var(--ink-soft); font-size:12px; letter-spacing:1px; margin:10px 0 4px; }
+    pre { background:var(--code); padding:12px; border-radius:8px; font-size:13px; overflow:auto;
+      max-height:240px; margin:8px 0 0; border:1px solid rgba(30,27,23,.08); }
+    .box { font-size:13px; color:var(--ink-soft); min-height:20px; margin-top:8px; }
+
+    button { color:#FBF6EC; font-size:14px; font-weight:700; letter-spacing:3px; cursor:pointer;
+      background:var(--cinnabar); border:1px solid var(--cinnabar); border-radius:10px;
+      padding:9px 18px; margin:4px 6px 0 0; font-family:inherit;
+      box-shadow:inset 0 -2px 0 rgba(0,0,0,.18); transition:all .25s ease; }
+    button:hover { background:var(--cinnabar-soft); transform:translateY(-1px); }
+    button:active { transform:translateY(0); }
+    button:disabled { color:var(--ink-faint); background:transparent; border-color:var(--line); box-shadow:none; }
+    button.outline { background:transparent; color:var(--ink); border:1.5px solid var(--ink); box-shadow:none; }
+    button.outline:hover { background:var(--ink); color:var(--paper); }
+    button.mini { font-size:11px; letter-spacing:1px; padding:3px 10px; margin:0 0 0 8px;
+      background:transparent; color:var(--ink-soft); border:1px solid var(--line); box-shadow:none; }
+    button.mini:hover { color:var(--cinnabar); border-color:var(--cinnabar); background:transparent; }
+    button.mono { font-family:ui-monospace,Menlo,Consolas,monospace; letter-spacing:1px; font-size:12px; }
+
+    input[type=text], textarea { width:100%; background:rgba(255,252,245,.5); border:1px solid var(--line);
+      border-radius:10px; padding:10px 14px; color:var(--ink); font-size:13px; font-family:inherit; resize:vertical; }
+    input[type=text]:focus, textarea:focus { outline:none; border-color:var(--ink-soft); }
+    .row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+    .perm { display:flex; align-items:center; gap:8px; padding:5px 0; font-size:13px; }
+    .perm input { accent-color:var(--cinnabar); width:16px; height:16px; }
+    .risk { color:var(--cinnabar); font-size:11px; font-weight:700; border:1px solid rgba(178,58,48,.35);
+      border-radius:6px; padding:1px 6px; background:rgba(178,58,48,.06); letter-spacing:1px; }
+
+    /* ── 命令面板（阶段D，FR-9） ── */
+    #palette { position:fixed; inset:0; z-index:100; display:none;
+      background:rgba(30,27,23,.32); backdrop-filter:blur(2px); align-items:flex-start; justify-content:center;
+      padding-top:13vh; }
+    #palette.open { display:flex; }
+    .pal-box { width:560px; max-width:92vw; background:var(--paper-2); border:1px solid var(--ink);
+      border-radius:14px; box-shadow:0 24px 60px -24px rgba(30,27,23,.55); overflow:hidden; }
+    .pal-box input { border:none; border-bottom:1px solid var(--line); border-radius:0;
+      background:transparent; padding:16px 18px; font-size:16px; color:var(--ink);
+      font-family:inherit; letter-spacing:1px; }
+    .pal-box input:focus { outline:none; }
+    #paletteList { max-height:340px; overflow-y:auto; padding:8px; }
+    .pal-item { display:flex; align-items:baseline; gap:10px; padding:9px 12px; border-radius:9px;
+      cursor:pointer; }
+    .pal-item.sel { background:rgba(178,58,48,.10); }
+    .pal-item .n { font-weight:700; letter-spacing:1px; color:var(--ink); font-size:14px; }
+    .pal-item .d { color:var(--ink-soft); font-size:12px; flex:1; }
+    .pal-item .s { color:var(--ink-faint); font-size:11px; }
+    .pal-item .p { color:var(--cinnabar); font-size:11px; font-weight:700; }
+    .pal-empty { color:var(--ink-faint); text-align:center; padding:20px; font-size:13px; letter-spacing:2px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand"><img id="logo" src="../resources/logo/octpusY.svg" alt="logo" /><span class="seal">OCTPLUGIN</span> · 墨韵工作台</span>
+    <span id="status" class="status pending">连接中…</span>
+    <div class="clock"><b id="clock">--:--</b><span id="week">WEEK</span></div>
+    <div class="win-controls">
+      <button class="min" id="btnMin" title="最小化"></button>
+      <button class="max" id="btnMax" title="最大化"><span class="m"></span><span class="r"></span></button>
+      <button class="tray" id="btnTray" title="收起到托盘">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path fill-rule="evenodd" d="M1 3.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM7.5 6a.5.5 0 0 1 1 0v6h1.793a.5.5 0 0 1 .353.854l-2.793 2.793a.5.5 0 0 1-.707 0L4.354 12.854a.5.5 0 0 1 .353-.854H6.5V6z"/>
+        </svg>
+      </button>
+      <button class="close" id="btnClose" title="关闭">✕</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <!-- 左侧导航 -->
+    <nav class="side">
+      <div class="nav-title">工作区</div>
+      <button class="side-btn active" data-panel="settings"><span class="dot"></span>设 置</button>
+      <button class="side-btn" data-panel="debug"><span class="dot"></span>调 试</button>
+      <button class="side-btn" data-panel="add"><span class="dot"></span>添加插件</button>
+    </nav>
+
+    <!-- 右侧内容 -->
+    <main class="main">
+      <!-- 设置面板 -->
+      <section class="panel active" id="panel-settings">
+        <div class="grid">
+          <div class="card">
+            <h2>依赖源设置</h2>
+            <label>镜像源（每行一个，首行优先）</label>
+            <textarea id="cfgIndex" rows="3" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"></textarea>
+            <label>下载缓存目录（留空用 uv 默认）</label>
+            <input id="cfgCache" type="text" placeholder="D:\Project\ElectronProject\OCTplugin\.cache" />
+            <div class="row"><button id="btnSaveCfg">保存依赖源设置</button></div>
+            <pre id="cfgResult">…</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 添加插件面板（阶段1 · 插件管理/导入） -->
+      <section class="panel" id="panel-add">
+        <div class="grid">
+          <div class="card">
+            <h2>已安装插件</h2>
+            <div id="mgmtList">连接后加载…</div>
+          </div>
+          <div class="card">
+            <h2>导入 / 移除</h2>
+            <div class="row">
+              <button id="btnPick">选择插件源目录并导入</button>
+              <button class="outline" id="btnMgmtRefresh">刷新列表</button>
+            </div>
+            <label>选中的插件（导入后需再次“安装依赖”）</label>
+            <pre id="mgmtLog">…</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 调试面板 -->
+      <section class="panel" id="panel-debug">
+        <div class="grid">
+          <div class="card">
+            <h2>插件列表</h2>
+            <pre id="list">…</pre>
+          </div>
+          <div class="card">
+            <h2>插件权限 <span id="grantCount" class="risk" style="display:none"></span></h2>
+            <div id="perms">连接后加载…</div>
+            <div class="row"><button class="outline" id="btnRead">经内核读文件</button></div>
+            <pre id="permResult">…</pre>
+          </div>
+          <div class="card">
+            <h2>插件依赖（隔离环境）</h2>
+            <div class="box" id="depArea">连接后加载…</div>
+            <div class="row">
+              <button class="outline" id="btnDeps">预览依赖</button>
+              <button id="btnInstall">安装并重启</button>
+            </div>
+            <pre id="depResult">…</pre>
+          </div>
+          <div class="card">
+            <h2>共享函数 <button class="mini" id="btnRegRefresh">刷新</button></h2>
+            <div class="box" id="fnArea">连接后加载…</div>
+            <div class="row">
+              <button class="outline" id="btnCallFn">调用 np2.version</button>
+            </div>
+            <pre id="fnResult">…</pre>
+          </div>
+          <div class="card">
+            <h2>事件流（阶段E）<button class="mini" id="btnEmit">发事件</button><button class="mini" id="btnEvClear">清屏</button></h2>
+            <pre id="evLog" style="font-size:12px;color:var(--ink-soft)">等待事件…</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 阶段G：动态插件 iframe 面板（由 renderPlugins 填充） -->
+      <div id="pluginArea"></div>
+    </main>
+  </div>
+
+  <!-- 命令面板（阶段D，FR-9） -->
+  <div id="palette">
+    <div class="pal-box">
+      <input id="paletteInput" type="text" placeholder="键入命令检索…（↑↓ 选择 · Enter 执行 · Esc 关闭）" />
+      <div id="paletteList"></div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require("electron");
+    const $ = (id) => document.getElementById(id);
+    const setStatus = (t, c) => { $("status").textContent = t; $("status").className = "status " + c; };
+    const rpc = (m, p) => ipcRenderer.invoke("rpc", m, p);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    // ── 自绘窗口控制（frame:false 无边框） ──
+    $("btnMin").onclick = () => ipcRenderer.send("win:minimize");
+    $("btnMax").onclick = () => ipcRenderer.send("win:maximize");
+    $("btnClose").onclick = () => ipcRenderer.send("win:close");
+    $("btnTray").onclick = () => ipcRenderer.send("win:tray");
+    // 点击 logo 隐藏/展开左侧栏
+    $("logo").onclick = () => document.body.classList.toggle("side-collapsed");
+    ipcRenderer.on("win:state", (e, s) => {
+      const b = $("btnMax");
+      const maxed = s === "max";
+      b.classList.toggle("restore", maxed);
+      b.title = maxed ? "还原" : "最大化";
+    });
+
+    // ── 阶段G · 插件 iframe 装配（web 插件自动进侧栏） ──
+    let KERNEL_BASE = ""; let OCT_CONN = { port: null, token: "" };
+    const mounted = new Set();
+    function renderPlugins(plugins) {
+      const nav = document.querySelector("nav.side");
+      const border = document.getElementById("pluginArea");
+      // 清空上一次动态区（保留 设置/调试 的“工作区”与新组）
+      $$(".plugin-nav").forEach(n => n.remove());
+      $$(".plugin-panel").forEach(p => p.remove());
+      const web = plugins.filter(p => p.ui && p.ui.type === "web");
+      if (web.length) {
+        const sep = document.createElement("div");
+        sep.className = "nav-title plugin-nav"; sep.textContent = "插件";
+        sep.style.cssText = "margin-top:14px;";
+        const anchor = document.querySelector("nav.side button[data-panel]");
+        nav.insertBefore(sep, anchor.nextSibling ? anchor.nextSibling : null);
+        web.forEach((p, i) => {
+          const btn = document.createElement("button");
+          btn.className = "side-btn plugin-nav"; btn.dataset.panel = "plugin." + p.pluginId;
+          btn.innerHTML = `<span class="dot"></span>${(p.name || p.pluginId).slice(0, 6)}`;
+          btn.onclick = () => switchPanel("plugin." + p.pluginId);
+          nav.insertBefore(btn, sep.nextSibling);
+          // 面板
+          const sec = document.createElement("section");
+          sec.className = "panel plugin-panel"; sec.id = "panel-plugin." + p.pluginId;
+          const frame = document.createElement("iframe");
+          frame.dataset.plugin = p.pluginId;
+          frame.src = KERNEL_BASE + "plugin/" + p.pluginId + "/" + (p.ui.entry || "ui/index.html");
+          frame.setAttribute("style", "width:100%;height:100%;border:none;border-radius:14px;background:transparent;display:block;");
+          sec.appendChild(frame);
+          border.appendChild(sec);
+          frame.addEventListener("load", () => mount(frame));
+        });
+      }
+    }
+    // iframe 加载完成后，把内核连接信息 postMessage 给插件页，插件页据此直连内核 WS。
+    // 插件面板填满由 CSS(.panel.plugin-panel.active 绝对定位)负责，这里只做握手。
+    function mount(frame) {
+      if (!frame.contentWindow) return;
+      const id = frame.dataset.plugin;
+      try {
+        if (mounted.has(id)) return; mounted.add(id);
+        frame.contentWindow.postMessage({ type: "oct.hello", port: OCT_CONN.port, token: OCT_CONN.token, pluginId: id }, "*");
+      } catch (e) { console.error("[plugin] 握手失败", id, e); }
+    }
+    // 插件 iframe 请求“以独立窗口打开页面”（如 md 编辑器）：组装内核地址并交主进程开窗。
+    // 子页 app.js 读取查询参数 auth/kport 自连内核。仅接受本内核 origin 的消息。
+    window.addEventListener("message", (ev) => {
+      const d = ev.data || {};
+      if (d.type !== "oct.openPluginWindow") return;
+      if (!d.path) return;
+      if (ev.origin && KERNEL_BASE && !("" + ev.origin).includes("127.0.0.1")) return;
+      const url = KERNEL_BASE + String(d.path || "").replace(/^\//, "");
+      ipcRenderer.invoke("win:openPluginWindow", {
+        url, title: d.title, width: d.width, height: d.height,
+      });
+    });
+
+    // ── 阶段1 · 「添加插件」管理面板 ──
+    async function refreshMgmt() {
+      try {
+        const r = await rpc("plugin.list", {});
+        const list = r.plugins || [];
+        $("mgmtList").innerHTML = list.length ? list.map(p =>
+          `<div class="perm"><input type="checkbox" data-pid="${p.pluginId}" data-type="${p.type}" data-ui="${p.ui && p.ui.type || ''}">` +
+          `<span>${p.name || p.pluginId}</span>` +
+          `<span style="color:var(--ink-faint);font-size:11px;margin-left:8px">${p.type}${p.ui && p.ui.type === 'web' ? ' · 网页UI' : ''}</span>` +
+          `<button class="mini" data-rm="${p.pluginId}">移除</button></div>`).join("")
+          : "（暂无插件）";
+        $("mgmtList").querySelectorAll("[data-rm]").forEach(b => b.onclick = async (e) => {
+          e.stopPropagation();
+          if (!confirm(`确定移除插件 ${b.dataset.rm}？（将删除其目录）`)) return;
+          try { await rpc("plugin.remove", { pluginId: b.dataset.rm }); $("mgmtLog").textContent = "已移除 " + b.dataset.rm; refreshMgmt(); }
+          catch (err) { $("mgmtLog").textContent = "移除失败：" + err.message; }
+        });
+      } catch (e) { $("mgmtList").textContent = "读取失败：" + e.message; }
+    }
+    $("btnMgmtRefresh").onclick = refreshMgmt;
+    $("btnPick").onclick = async () => {
+      try {
+        const dir = await ipcRenderer.invoke("dialog:pickDir");
+        if (dir.canceled) return;
+        $("mgmtLog").textContent = "导入中：" + dir.path;
+        const imp = await rpc("plugin.import", { srcPath: dir.path });
+        $("mgmtLog").textContent = "已导入 → 检查依赖（若提示未就绪请点“依赖→安装并重启”）。";
+        refreshMgmt();
+      } catch (e) { $("mgmtLog").textContent = "导入失败：" + e.message; }
+    };
+
+    // 左侧标签切换（统一入口，仅切换 .active 显示即可）
+    function showPanel(name) {
+      $$(".side-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
+      $$(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
+    }
+    $$(".side-btn").forEach(btn => btn.onclick = () => showPanel(btn.dataset.panel));
+
+    const WEEK = ["日","一","二","三","四","五","六"];
+    function tick() {
+      const d = new Date();
+      $("clock").textContent = [d.getHours(),d.getMinutes()].map(x=>String(x).padStart(2,"0")).join(":");
+      $("week").textContent = d.toLocaleDateString("zh-CN",{month:"long"}) + " · 星期" + WEEK[d.getDay()];
+    }
+    tick(); setInterval(tick, 1000);
+
+    ipcRenderer.on("kernel:ready", async (e, { list, hello, details, resBase, kernelBase, port, token }) => {
+      setStatus("内核已连接", "ok");
+      if (resBase) $("logo").src = resBase + "logo/octpusY.svg"; // 阶段E：资源服务
+      KERNEL_BASE = kernelBase; OCT_CONN = { port, token };
+      $("list").textContent = JSON.stringify({ list, hello }, null, 2);
+      renderPlugins(list && list.plugins || []);
+      renderPerms(details);
+      loadDepCfg();
+      refreshFns();
+      refreshMgmt();
+    });
+
+    async function loadDepCfg() {
+      try {
+        const c = await rpc("deps.getConfig", {});
+        $("cfgIndex").value = (c.index_urls || []).join("\n");
+        $("cfgCache").value = c.cache_dir || "";
+      } catch (e) { $("cfgResult").textContent = "读取设置失败：" + e.message; }
+    }
+    $("btnSaveCfg").onclick = async () => {
+      const indexUrls = $("cfgIndex").value.split("\n").map(s => s.trim()).filter(Boolean);
+      try {
+        await rpc("deps.setConfig", { index_urls: indexUrls, cache_dir: $("cfgCache").value.trim() });
+        $("cfgResult").textContent = "已保存，下次安装依赖生效。" + (indexUrls.length ? `（${indexUrls[0]}）` : "（用官方源）");
+      } catch (e) { $("cfgResult").textContent = "保存失败：" + e.message; }
+    };
+
+    function renderPerms(d) {
+      const declared = d.permissionsDeclared || [];
+      const granted = d.permissionsGranted || [];
+      let html = "";
+      for (const p of declared) {
+        const has = granted.includes(p);
+        const risk = d.highRisk && d.highRisk.includes(p) ? `<span class="risk">高危</span>` : "";
+        html += `<div class="perm"><input type="checkbox" data-perm="${p}" ${has?"checked":""}>` +
+          `<span>${p}${risk}</span></div>`;
+      }
+      $("perms").innerHTML = html;
+      $("grantCount").style.display = granted.length ? "" : "none";
+      $("grantCount").textContent = `已授权 ${granted.length}`;
+      for (const cb of $("perms").querySelectorAll("input[type=checkbox]")) {
+        cb.onchange = async () => {
+          const perm = cb.dataset.perm;
+          try {
+            if (cb.checked) {
+              const r = await rpc("perms.authorize", { pluginId: "demo_hello", perms: [perm] });
+              $("permResult").textContent = `已允许 ${perm}：` + JSON.stringify(r.granted);
+            } else {
+              await rpc("perms.revoke", { pluginId: "demo_hello", perm });
+              $("permResult").textContent = `已回收 ${perm}`;
+            }
+          } catch (e) {
+            cb.checked = !cb.checked;
+            $("permResult").textContent = `操作失败：${e.message}`;
+          }
+        };
+      }
+    }
+
+    $("btnDeps").onclick = async () => {
+      try {
+        const r = await rpc("deps.preview", { pluginId: "demo_hello" });
+        $("depArea").textContent = r.satisfied
+          ? "已就绪（隔离环境存在）"
+          : "待安装：" + JSON.stringify(r.dependencies, null, 2);
+        $("depResult").textContent = "饱和度：" + r.satisfied;
+      } catch (e) { $("depResult").textContent = "预览失败：" + e.message; }
+    };
+
+    $("btnInstall").onclick = async () => {
+      $("depResult").textContent = "安装中…";
+      try {
+        const r = await rpc("deps.install", { pluginId: "demo_hello" });
+        $("depResult").textContent = "已安装 → " + r.venvPython;
+        await rpc("plugin.restart", { pluginId: "demo_hello" });
+        $("depResult").textContent += "\n插件已重启，切换为隔离解释器。";
+      } catch (e) { $("depResult").textContent = "安装失败：" + e.message; }
+    };
+
+    $("btnRead").onclick = async () => {
+      const path = require("path").join(__dirname, "..", "store", "perms.json");
+      try {
+        const r = await rpc("plugin.call", { pluginId: "demo_hello", method: "readfile", params: { path } });
+        $("permResult").textContent = "读文件结果：" + JSON.stringify(r, null, 2);
+      } catch (e) { $("permResult").textContent = "读文件被拒绝：" + e.message; }
+    };
+
+    // 共享函数卡（阶段C）
+    async function refreshFns() {
+      try {
+        const r = await rpc("registry.list", {});
+        const fns = r.functions || [];
+        if (!fns.length) { $("fnArea").textContent = "（暂无已注册共享函数）"; return; }
+        $("fnArea").innerHTML = fns.map(f =>
+          `<div class="perm"><input type="checkbox" data-name="${f.name}">` +
+          `<span class="mono">${f.name}</span><span class="risk" style="color:var(--ink-faint);border-color:var(--line);background:transparent">${f.pluginId}</span>` +
+          `<span style="color:var(--ink-faint);font-size:11px">${f.desc}</span></div>`).join("");
+      } catch (e) { $("fnArea").textContent = "读取失败：" + e.message; }
+    }
+    $("btnRegRefresh").onclick = refreshFns;
+    $("btnCallFn").onclick = async () => {
+      const chosen = $("fnArea").querySelector("input[type=checkbox]:checked");
+      const name = chosen ? chosen.dataset.name : "np2.version";
+      try {
+        const r = await rpc("registry.call", { name, params: {} });
+        $("fnResult").textContent = `调用 ${name} → ` + JSON.stringify(r.result, null, 2);
+      } catch (e) { $("fnResult").textContent = `调用 ${name} 失败：` + e.message; }
+    };
+
+    ipcRenderer.on("kernel:error", (e, err) => { setStatus("启动失败", "err"); $("permResult").textContent = err; });
+    // 阶段E·事件流：内核转发的 notification（event）实时显示
+    let evCount = 0;
+    ipcRenderer.on("kernel:event", (e, raw) => {
+      let t;
+      try { t = JSON.parse(raw); } catch { console.log("event:", raw); return; }
+      if (t.method !== "event") { console.log("event:", raw); return; }
+      const p = t.params || {};
+      console.log(`[event] ${p.source}:${p.type}`, p.data);
+      if (++evCount > 200) { $("evLog").textContent = ""; evCount = 0; }
+      const pretty = JSON.stringify(p.data) ?? "";
+      $("evLog").textContent = `${new Date().toLocaleTimeString()} · ${p.source} · ${p.type} ${pretty}\n` + $("evLog").textContent;
+    });
+    // 触发 demo_np1 发一条事件（插件→内核→宿主）
+    $("btnEmit").onclick = async () => {
+      try {
+        const r = await rpc("plugin.call", { pluginId: "demo_np1", method: "emit_event", params: {} });
+        $("evLog").textContent = `${new Date().toLocaleTimeString()} · 已请求 demo_np1 发事件 ${JSON.stringify(r)}\n` + $("evLog").textContent;
+      } catch (err) { $("evLog").textContent = `触发失败：${err.message}\n` + $("evLog").textContent; }
+    };
+    $("btnEvClear").onclick = () => { $("evLog").textContent = "（已清屏）"; evCount = 0; };
+
+    // ── 命令面板（阶段D，FR-9） ──
+    const SYS_CMDS = [
+      { name: "/goto:settings", desc: "打开「设置」面板", kind: "sys", act: () => switchPanel("settings") },
+      { name: "/goto:debug", desc: "打开「调试」面板", kind: "sys", act: () => switchPanel("debug") },
+    ];
+    let PALETTE = [];     // 全部命令（sys + 内核插件命令）
+    let FILTERED = [];
+    let selIdx = 0;
+    function switchPanel(name) { showPanel(name); }
+    function refreshPalette() {
+      return rpc("command.list", {}).then(r => {
+        PALETTE = SYS_CMDS.concat((r.commands || []).map(c => ({
+          name: c.name, desc: c.desc, kind: "plugin", pluginId: c.pluginId,
+          method: c.method, params: c.params || [],
+          act: async () => {
+            const { ok } = await rpc("plugin.call", { pluginId: c.pluginId, method: c.method, params: {} });
+            return JSON.stringify(ok);
+          },
+        })));
+        renderPalette();
+      });
+    }
+    function renderPalette() {
+      const q = $("paletteInput").value.trim().toLowerCase();
+      FILTERED = PALETTE.filter(p => !q || p.name.toLowerCase().includes(q) || (p.desc || "").toLowerCase().includes(q));
+      selIdx = 0;
+      const list = $("paletteList");
+      if (!FILTERED.length) { list.innerHTML = `<div class="pal-empty">无匹配命令</div>`; return; }
+      list.innerHTML = FILTERED.map((p, i) =>
+        `<div class="pal-item${i === selIdx ? " sel" : ""}" data-i="${i}">
+          <span class="n">${p.name}</span>
+          ${p.params.length ? `<span class="p">·${p.params.length} 参</span>` : ""}
+          <span class="s">${p.kind === "sys" ? "系统" : (p.pluginId || "")}</span>
+          <span class="d">${p.desc || ""}</span>
+        </div>`).join("");
+    }
+    function selectDelta(d) {
+      selIdx = (selIdx + d + FILTERED.length) % FILTERED.length;
+      const els = $("paletteList").querySelectorAll(".pal-item");
+      els.forEach(el => el.classList.toggle("sel", +el.dataset.i === selIdx));
+      els[selIdx] && els[selIdx].scrollIntoView({ block: "nearest" });
+    }
+    async function execPalette() {
+      const cmd = FILTERED[selIdx];
+      if (!cmd) return;
+      closePalette();
+      try {
+        const out = await cmd.act();
+        console.log(`[palette] ${cmd.name} →`, out);
+      } catch (e) { console.error(`[palette] ${cmd.name} 执行失败`, e.message); }
+    }
+    function openPalette() { $("palette").classList.add("open"); $("paletteInput").value = ""; refreshPalette(); $("paletteInput").focus(); }
+    function closePalette() { $("palette").classList.remove("open"); }
+    ipcRenderer.on("palette:open", openPalette);
+    $("paletteInput").addEventListener("input", renderPalette);
+    $("paletteInput").addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closePalette();
+      else if (e.key === "ArrowDown") { e.preventDefault(); selectDelta(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); selectDelta(-1); }
+      else if (e.key === "Enter") { e.preventDefault(); execPalette(); }
+    });
+    $("paletteList").addEventListener("mousedown", (e) => {
+      const it = e.target.closest(".pal-item"); if (!it) return;
+      selIdx = +it.dataset.i; execPalette();
+    });
+    $("palette").addEventListener("mousedown", (e) => { if (e.target === $("palette")) closePalette(); });
+  </script>
+</body>
+</html>

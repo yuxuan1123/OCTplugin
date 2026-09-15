@@ -1,0 +1,17 @@
+{
+  "id": "merge",
+  "name": "合并",
+  "version": "1.0.0",
+  "type": "Python",
+  "entry": "main.py",
+  "ui": { "type": "web", "entry": "ui/index.html" },
+  "load_mode": "always",
+  "permissions": ["file_read", "file_write"],
+  "dependencies": [],
+  "commands": [],
+  "functions": [
+    { "name": "merge.append", "method": "merge.append", "desc": "追加/合并文本到目标文件" },
+    { "name": "merge.read", "method": "merge.read", "desc": "读取目标文件当前内容" },
+    { "name": "merge.ping", "method": "ping", "desc": "合并桥连通性" }
+  ]
+}

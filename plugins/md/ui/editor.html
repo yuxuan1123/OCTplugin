@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Markdown 编辑器</title>
+  <link rel="stylesheet" href="/res/theme/plugin.css" />
+  <style>
+    html,body{ height:100%; }
+    body{ margin:0; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column;
+      font-family:var(--font); color:var(--ink); background:var(--paper); -webkit-font-smoothing:antialiased; }
+    .hidden{ display:none !important; }
+    button{ font-family:var(--font); }
+
+    .toolbar{ display:flex; align-items:center; gap:10px; padding:12px 16px; flex:0 0 auto;
+      border-bottom:1px solid var(--line); background:var(--card); flex-wrap:wrap; }
+    #name{ width:240px; min-width:160px; background:rgba(255,252,245,.6); border:1px solid var(--line);
+      border-radius:9px; padding:8px 12px; color:var(--ink); font-family:var(--font); font-size:13px; outline:none; }
+    #name:focus{ border-color:var(--gold); }
+    .status{ font-size:12px; letter-spacing:1px; }
+    .status.saved{ color:var(--celadon); } .status.dirty{ color:var(--cinnabar); }
+    .spacer{ flex:1; }
+    .view{ } .view.active{ background:var(--gold); color:#FBF7EE; border-color:var(--gold); }
+    .vsep{ width:1px; height:20px; background:var(--line); margin:0 2px; }
+    .danger{ color:var(--cinnabar); border-color:var(--cinnabar); background:transparent; }
+    .danger:hover{ background:var(--cinnabar); color:#FBF7EE; }
+
+    .body{ flex:1 1 auto; display:flex; gap:12px; padding:14px; min-height:0; }
+    .pane{ flex:1 1 50%; display:flex; flex-direction:column; min-width:0; min-height:0; }
+    .pane-tip{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-soft);
+      letter-spacing:1px; margin-bottom:8px; }
+    .pane-tip .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+    #source{ flex:1 1 auto; resize:none; background:rgba(255,252,245,.6); border:1px solid var(--line);
+      border-radius:10px; padding:14px; color:var(--ink); font-family:Consolas,'Courier New',monospace;
+      font-size:13px; line-height:1.75; outline:none; white-space:pre; overflow:auto; }
+    #source:focus{ border-color:var(--gold); }
+    #preview{ flex:1 1 auto; overflow-y:auto; min-height:0; }
+
+    .statusbar{ display:flex; align-items:center; gap:10px; padding:6px 16px; flex:0 0 auto;
+      border-top:1px solid var(--line); background:var(--card); font-size:11px; color:var(--ink-soft); }
+    #path{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+    /* 渲染内容共用 */
+    .md-preview{ line-height:1.85; font-size:14.5px; color:var(--ink); }
+    .md-preview h1,.md-preview h2,.md-preview h3,.md-preview h4,.md-preview h5,.md-preview h6{
+      color:var(--ink); border-bottom:1px solid var(--line); padding-bottom:5px; letter-spacing:1px; margin:18px 0 10px; }
+    .md-preview h1{ font-size:24px; } .md-preview h2{ font-size:20px; } .md-preview h3{ font-size:17px; }
+    .md-preview h4,.md-preview h5,.md-preview h6{ font-size:15px; }
+    .md-preview a{ color:var(--gold); text-decoration:none; } .md-preview a:hover{ text-decoration:underline; }
+    .md-preview code{ background:var(--code); color:#3a352c; padding:1px 5px; border-radius:4px;
+      font-family:Consolas,'Courier New',monospace; font-size:12.5px; }
+    .md-preview del{ text-decoration:line-through; }
+    .md-preview hr{ border:none; border-top:1px solid var(--line); margin:18px 0; }
+    .md-preview blockquote{ margin:12px 0; padding:2px 14px; border-left:3px solid var(--gold);
+      color:var(--ink-soft); background:var(--code); border-radius:0 8px 8px 0; }
+    .md-preview table{ border-collapse:collapse; width:100%; margin:12px 0; }
+    .md-preview th{ background:var(--paper-2); border:1px solid var(--line); padding:6px 10px; text-align:left; font-weight:700; }
+    .md-preview td{ border:1px solid var(--line); padding:6px 10px; }
+    .md-preview img{ max-width:100%; border-radius:6px; }
+    .md-preview ul,.md-preview ol{ padding-left:24px; }
+    .md-preview li{ margin-bottom:3px; } .md-preview p{ margin:8px 0; }
+    .md-preview .code-block{ margin:14px 0; }
+    .md-preview .code-head{ display:flex; align-items:center; justify-content:space-between;
+      background:var(--paper-2); border:1px solid var(--line); border-bottom:none; border-radius:9px 9px 0 0;
+      padding:5px 10px; font-size:11px; color:var(--ink-soft); letter-spacing:1px; }
+    .md-preview pre{ margin:0; background:var(--code); color:#3a352c; border:1px solid var(--line);
+      border-radius:0 0 9px 9px; padding:12px 14px; font-size:12.5px; line-height:1.7; overflow:auto;
+      font-family:Consolas,'Courier New',monospace; white-space:pre; }
+    #toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); background:var(--ink);
+      color:#FBF7EE; padding:9px 18px; border-radius:20px; font-size:12px; opacity:0; transition:opacity .25s;
+      pointer-events:none; z-index:99; max-width:80vw; }
+    #toast.show{ opacity:1; } #toast.warn{ background:var(--cinnabar); } #toast.ok{ background:var(--celadon); }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <input id="name" placeholder="文件名" spellcheck="false" />
+    <span class="status saved" id="status">✓ 已保存</span>
+    <div class="spacer"></div>
+    <button class="btn ghost mini view active" id="v-split">分屏</button>
+    <button class="btn ghost mini view" id="v-edit">编辑</button>
+    <button class="btn ghost mini view" id="v-preview">预览</button>
+    <div class="vsep"></div>
+    <button class="btn ghost mini" id="save-as">另存为</button>
+    <button class="btn ghost mini danger" id="delete">删除</button>
+    <button class="btn mini" id="save">保存</button>
+  </div>
+
+  <div class="body">
+    <div class="pane" id="editPane">
+      <div class="pane-tip"><span class="dot"></span>编辑</div>
+      <textarea id="source" placeholder="# 开始写作…" spellcheck="false"></textarea>
+    </div>
+    <div class="pane" id="prevPane">
+      <div class="pane-tip"><span class="dot"></span>预览</div>
+      <div class="md-preview" id="preview"></div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span id="path"></span>
+    <div class="spacer"></div>
+    <span id="count">0 字</span>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+  <script src="render.js"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

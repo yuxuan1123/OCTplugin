@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>合并</title>
+  <link rel="stylesheet" href="/res/theme/plugin.css" />
+  <style>
+    /* ══ 合并 · 国风墨水 ══
+       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+    html{ height:100%; overflow:hidden; }
+    body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto;
+      padding:22px; background:transparent; color:var(--ink); font-family:var(--font); }
+
+    .card{ flex:0 0 auto; }
+    .card h3{ display:flex; align-items:center; gap:8px; }
+    .card h3 .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+
+    /* 路径输入行 */
+    .path-row{ display:flex; gap:10px; }
+    #path-input{
+      flex:1; background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:9px 12px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none;
+    }
+    #path-input:focus{ border-color:var(--gold); }
+    .sub{ color:var(--ink-soft); font-size:12px; letter-spacing:1px; margin-top:8px; }
+
+    /* 文本输入 */
+    #content-area{
+      width:100%; min-height:160px; resize:vertical; background:var(--code);
+      border:1px solid var(--line); border-radius:10px; padding:12px; color:#3a352c;
+      font-family:Consolas,'Courier New',monospace; font-size:13px; line-height:1.6; outline:none;
+    }
+    #content-area:focus{ border-color:var(--gold); }
+
+    /* 选项行 */
+    .opt-row{ display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-top:10px; }
+    .opt-row label{ display:inline-flex; align-items:center; gap:6px; font-size:13px;
+      color:var(--ink); letter-spacing:1px; cursor:pointer; }
+    .opt-row input[type=checkbox]{ accent-color:var(--gold); width:15px; height:15px; cursor:pointer; }
+    #prefix-input{
+      width:220px; background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:8px; padding:7px 10px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none;
+    }
+    #prefix-input:focus{ border-color:var(--gold); }
+
+    /* 操作行 */
+    .act-row{ display:flex; align-items:center; gap:12px; margin-top:14px; }
+    #merge-btn{ flex:0 0 auto; height:40px; border-radius:9px; border:none;
+      cursor:pointer; font-family:var(--font); font-weight:700; letter-spacing:2px; font-size:14px;
+      background:linear-gradient(135deg,#b9965f,#8f6f3d); color:#FBF7EE;
+      transition:filter .18s; }
+    #merge-btn:hover{ filter:brightness(1.08); }
+    #merge-btn:disabled{ opacity:.5; cursor:not-allowed; }
+    #refresh-btn{ flex:0 0 auto; height:40px; }
+    .spacer{ flex:1; }
+
+    /* 日志/预览 */
+    #log-box{
+      width:100%; height:150px; background:var(--code); border:1px solid var(--line);
+      border-radius:10px; padding:12px; color:#3a352c; overflow:auto; white-space:pre-wrap;
+      font-family:Consolas,'Courier New',monospace; font-size:12px; line-height:1.6;
+    }
+
+    /* Toast（墨黑底） */
+    .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
+      background:var(--ink); color:#FBF7EE; padding:9px 16px; border-radius:20px;
+      font-size:12px; letter-spacing:.5px; opacity:0; transition:opacity .25s;
+      pointer-events:none; z-index:99; }
+    .toast.show{ opacity:1; }
+    .toast.err{ background:#7a2a22; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h3><span class="dot"></span>目标文件</h3>
+    <div class="path-row">
+      <input id="path-input" type="text" spellcheck="false"
+             placeholder="输入目标文件绝对路径，例如 C:\data\out.txt" />
+      <input id="pick-file" type="file" style="display:none" />
+      <button class="btn ghost" id="pick-btn">选文件预览</button>
+    </div>
+    <div class="sub" id="preview-hint">未加载目标文件</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot"></span>待合并内容</h3>
+    <textarea id="content-area" placeholder="在此粘贴要追加/合并到目标文件的内容…"></textarea>
+    <div class="opt-row">
+      <label><input type="checkbox" id="opt-newline" checked />追加前先换行</label>
+      <label><input type="checkbox" id="opt-timestamp" />加时间戳前缀</label>
+      <label style="gap:6px;">
+        <span style="color:var(--ink-soft);font-size:12px;">自定义前缀</span>
+        <input id="prefix-input" type="text" placeholder="（可选）每段前缀文本…" />
+      </label>
+    </div>
+    <div class="act-row">
+      <button id="merge-btn">合并 / 追加</button>
+      <button class="btn ghost" id="refresh-btn">刷新预览</button>
+      <div class="spacer"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="dot"></span>日志 / 目标文件当前内容</h3>
+    <div id="log-box">等待操作…</div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
