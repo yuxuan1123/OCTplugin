@@ -114,7 +114,7 @@ echo [Step 3/4] Scenario C: shutdown at 17:58 (unconditional)...
 
 for /f %%a in ('powershell -NoProfile -Command Get-Date -Format yyyy-MM-dd') do set "TODAY=%%a"
 
-schtasks /create /tn "OneTimeShutdown" /tr "shutdown /s /f /t 0" /sc once /sd %TODAY% /st 17:58 /f >nul 2>&1
+schtasks /create /tn "OneTimeShutdown" /tr "shutdown /s /f /t 120" /sc once /sd %TODAY% /st 17:58 /f >nul 2>&1
 
 if %errorLevel% equ 0 (
     echo   SUCCESS.

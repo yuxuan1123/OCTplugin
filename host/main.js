@@ -95,10 +95,10 @@ async function bootstrap() {
     kernelAuth = auth; // 供后续创建插件子窗口（md 编辑器等）复用端口/token
     await connect(auth);
     const list = await rpc("plugin.list", {});
-    const details = await rpc("plugin.details", { pluginId: "demo_hello" });
-    const hello = await rpc("plugin.call", {
-      pluginId: "demo_hello", method: "hello", params: { name: "OCTplugin" },
-    });
+    // 演示调用：demo_hello 可能被用户设为 disabled/lazy 或移除。失败不应阻断 UI 启动。
+    let details = null, hello = null;
+    try { details = await rpc("plugin.details", { pluginId: "demo_hello" }); } catch (e) {}
+    try { hello = await rpc("plugin.call", { pluginId: "demo_hello", method: "hello", params: { name: "OCTplugin" } }); } catch (e) {}
     win.webContents.send("kernel:ready", {
       list, hello, details,
       kernelBase: `http://127.0.0.1:${auth.port}/`,
@@ -189,15 +189,16 @@ function rpc(method, params) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     ws.send(JSON.stringify({ v: 1, jsonrpc: "2.0", id, method, params }));
+    const timer = setTimeout(() => { ws.off("message", onMsg); reject(new Error("RPC 超时: " + method)); }, 15000);
     const onMsg = (m) => {
       const msg = JSON.parse(m.toString());
       if (msg.id !== id) return;
       ws.off("message", onMsg);
+      clearTimeout(timer);
       if (msg.error) reject(new Error(msg.error.message + " " + JSON.stringify(msg.error.data || "")));
       else resolve(msg.result);
     };
     ws.on("message", onMsg);
-    setTimeout(() => reject(new Error("RPC 超时")), 10000);
   });
 }
 

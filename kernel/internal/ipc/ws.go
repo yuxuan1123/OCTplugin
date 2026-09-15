@@ -62,6 +62,11 @@ func (s *Server) WireEvents() {
 	}
 }
 
+// EventSink 返回一个插件→内核→宿主的广播闭包，供懒启动/重启的新插件实例注入 Event。
+func (s *Server) EventSink() func(src, typ string, data any) {
+	return func(src, typ string, data any) { s.broadcast(src, typ, data) }
+}
+
 // broadcast 把插件事件以 ws 通知（无 id）推给宿主（FR-8 事件通道）。
 func (s *Server) broadcast(src, typ string, data any) {
 	s.mu.Lock()
@@ -206,22 +211,22 @@ func (s *Server) dispatch(conn *websocket.Conn, req protocol.Request) {
 		s.handleRegistryCall(conn, req)
 	case "command.list":
 		s.handleCommandList(conn, req)
+	case "plugin.getLifecycle":
+		s.handlePluginGetLifecycle(conn, req)
+	case "plugin.updateSettings":
+		s.handlePluginUpdateSettings(conn, req)
 	default:
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrMethodNotFound, nil))
 	}
 }
 
 func (s *Server) handleList(conn *websocket.Conn, req protocol.Request) {
-	ids := s.smanager.List()
-	res := make([]map[string]any, 0, len(ids))
-	for _, id := range ids {
-		p := s.smanager.Plugin(id)
-		if p == nil {
-			continue
-		}
+	sums := s.smanager.All()
+	res := make([]map[string]any, 0, len(sums))
+	for _, sm := range sums {
 		res = append(res, map[string]any{
-			"pluginId": id, "name": p.Manifest.Name, "type": p.Manifest.Type,
-			"state": "RUNNING", "ui": p.Manifest.UI,
+			"pluginId": sm.ID, "name": sm.Name, "type": sm.Type,
+			"state": sm.State, "disabled": sm.Disabled, "ui": sm.UI,
 		})
 	}
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{"plugins": res}))
@@ -233,12 +238,11 @@ func (s *Server) handlePluginDetails(conn *websocket.Conn, req protocol.Request)
 		PluginID string `json:"pluginId"`
 	}
 	_ = json.Unmarshal(req.Params, &p)
-	pl := s.smanager.Plugin(p.PluginID)
-	if pl == nil {
+	mf, ok := s.smanager.Describe(p.PluginID)
+	if !ok {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginMissing, map[string]any{"pluginId": p.PluginID}))
 		return
 	}
-	mf := pl.Manifest
 	decl, granted, high := s.gate.Subset(mf.ID)
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{
 		"pluginId": mf.ID, "name": mf.Name, "type": mf.Type, "entry": mf.Entry,
@@ -247,8 +251,42 @@ func (s *Server) handlePluginDetails(conn *websocket.Conn, req protocol.Request)
 		"highRisk":     high,
 		"dependencies": mf.Dependencies,
 		"commands":     mf.Commands,
-		"state":        "RUNNING",
+		"lifecycle":    mf.LifecyclePolicy,
+		"state":        s.smanager.State(p.PluginID),
 	}))
+}
+
+// plugin.getLifecycle 返回某插件的生命周期策略视图（默认/覆盖/生效）+ 状态。
+func (s *Server) handlePluginGetLifecycle(conn *websocket.Conn, req protocol.Request) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil || p.PluginID == "" {
+		s.reply(conn, protocol.NewError(req.ID, protocol.ErrParse, nil))
+		return
+	}
+	view := s.smanager.Lifecycle(p.PluginID)
+	s.reply(conn, protocol.NewResult(req.ID, view))
+}
+
+// plugin.updateSettings 保存某插件的用户覆盖并立即生效（内部会重启该插件）。
+// 参数与 Override 字段对齐；未提供/为 null 的字段视为不改动，清空传空对象 `{}` 意为恢复 manifest 默认。
+func (s *Server) handlePluginUpdateSettings(conn *websocket.Conn, req protocol.Request) {
+	var p struct {
+		PluginID string              `json:"pluginId"`
+		Override supervisor.Override `json:"override"`
+	}
+	if err := json.Unmarshal(req.Params, &p); err != nil || p.PluginID == "" {
+		s.reply(conn, protocol.NewError(req.ID, protocol.ErrParse, nil))
+		return
+	}
+	if err := s.smanager.SetLifecycle(p.PluginID, p.Override); err != nil {
+		s.reply(conn, protocol.NewError(req.ID, protocol.ErrDepsInstall, map[string]any{"error": err.Error()}))
+		return
+	}
+	s.WireEvents() // 重启会新建 Plugin，需重注事件广播出口
+	view := s.smanager.Lifecycle(p.PluginID)
+	s.reply(conn, protocol.NewResult(req.ID, map[string]any{"ok": true, "effective": view.Effective, "state": view.State}))
 }
 
 // perms.list 查询某插件权限状态。
@@ -462,9 +500,12 @@ func (s *Server) handleCall(conn *websocket.Conn, req protocol.Request) {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrParse, nil))
 		return
 	}
-	pl := s.smanager.Plugin(p.PluginID)
-	if pl == nil {
-		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginMissing, map[string]any{"pluginId": p.PluginID}))
+	// 懒启动：未运行（lazy/prewarm 或已回收）则先按需拉起，再派发请求。
+	pl, gerr := s.smanager.GetOrStart(p.PluginID)
+	if gerr != nil {
+		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginDown, map[string]any{
+			"pluginId": p.PluginID, "error": gerr.Error(),
+		}))
 		return
 	}
 	if !pl.Alive() {
@@ -474,6 +515,10 @@ func (s *Server) handleCall(conn *websocket.Conn, req protocol.Request) {
 	timeout := 15 * time.Second
 	if p.Timeout != nil {
 		timeout = time.Duration(*p.Timeout) * time.Millisecond
+	}
+	// 未显式给超时时，用插件 manifest 声明的单请求超时（若有）。
+	if p.Timeout == nil && pl.Manifest.Limits.RequestTimeoutMs > 0 {
+		timeout = time.Duration(pl.Manifest.Limits.RequestTimeoutMs) * time.Millisecond
 	}
 	var params any
 	if len(p.Params) > 0 {

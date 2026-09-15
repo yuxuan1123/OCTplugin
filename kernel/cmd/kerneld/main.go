@@ -32,6 +32,8 @@ func main() {
 	gate := perms.NewGate(filepath.Join(storeDir, "perms.json"))
 
 	manager := supervisor.NewManager(pluginsDir, gate)
+	// 阶段三：用户生命周期覆盖持久化 store/overrides.json
+	manager.SetStoreDir(storeDir)
 	// 阶段B：依赖隔离——uv 从环境注入，失败回退 "uv"
 	uvBin := os.Getenv("OCTRUN_UV")
 	if uvBin == "" {
@@ -70,7 +72,9 @@ func main() {
 
 	manager.StartAll()
 	defer manager.StopAll()
-	srv.WireEvents() // 阶段E：插件事件广播出口（StartAll 之后才可注入）
+	// 每个插件实例启动（含懒启动/退避重启的新实例）都注入事件广播出口。
+	manager.SetOnSpawn(func(p *supervisor.Plugin) { p.Event = srv.EventSink() })
+	srv.WireEvents() // 阶段E：立即运行中的插件也补注事件出口（与 StartAll 前保持兼容）
 
 	go srv.Serve(ln)
 

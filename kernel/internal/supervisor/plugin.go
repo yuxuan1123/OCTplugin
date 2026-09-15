@@ -1,7 +1,6 @@
 package supervisor
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,41 +15,47 @@ import (
 	"github.com/octplugin/kernel/internal/protocol"
 )
 
-// 心跳间隔 / 超时（对应 OCTools：5s ping，12s 无响应判定卡死）
-const (
-	HeartbeatInterval = 5 * time.Second
-	HeartbeatTimeout  = 3 * HeartbeatInterval
-)
-
+// Manifest 描述文件声明（schema）。生命周期策略见 LifecyclePolicy（supervisor/lifecycle.go）。
 type Manifest struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Entry    string `json:"entry"` // 相对插件目录的入口文件，如 main.py
-	UIMode   string `json:"ui_mode"`
-	Dir      string `json:"-"`
-	Py3v     string `json:"python_version,omitempty"` // 默认 "3.12"
-	LoadMode string `json:"load_mode"`                // always/lazy/auto_recycle
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Entry  string `json:"entry"` // 相对插件目录的入口文件，如 main.py
+	UIMode string `json:"ui_mode"`
+	Dir    string `json:"-"`
+	Py3v   string `json:"python_version,omitempty"` // 默认 "3.12"
+	LifecyclePolicy
 	ManifestFields
 }
 
+// Plugin 一个已启动/待启动插件进程的运行实例（低层：进程、stdin/stdout 协议、活性计量）。
+// 生命周期状态机（start/idle/stop/backoff-restart）由 Manager 驱动，Plugin 只负责：
+//   - 派生子进程、读写 JSON-RPC 行；
+//   - 维护 lastPong（任何成功读行视为活性）、lastActivity（空闲回收依据）；
+//   - 进程退出回收（Wait/exitCode），并回调 onExit 通知 Manager。
 type Plugin struct {
 	ID       string
 	Manifest Manifest
 	Gate     *perms.Gate                     // 敏感操作拦截（插件→内核 gate 请求）
-	mgr      *Manager                        // 阶段C：供插件发起的跨插件 registry.call 路由
-	Event    func(src, typ string, data any) // 阶段E：插件→内核→宿主的广播出口
-	proc     *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
+	mgr      *Manager                        // 跨插件 registry.call 路由
+	Event    func(src, typ string, data any) // 插件→内核→宿主事件广播出口
 
-	mu      sync.Mutex
-	nextID  int
-	pending map[int]chan protocol.Response
+	proc        *exec.Cmd
+	stdin       io.WriteCloser
+	stdout      io.ReadCloser
+	limitCloser func()                     // 释放 Job Object 等资源
+	onExit      func(crash bool, code int) // 由 Manager 注入；进程退出后回调
+	onExitOnce  sync.Once
+	waitOnce    sync.Once
 
-	lastPong time.Time
-
-	alive bool
+	mu           sync.Mutex
+	nextID       int
+	pending      map[int]chan protocol.Response
+	lastPong     time.Time
+	lastActivity time.Time
+	alive        bool
+	exitCode     int
+	exitCh       chan struct{} // handleExit 后关闭，供 Stop/supervise 等待
 }
 
 // LocatePython 用 uv 定位托管解释器（only-managed，不依赖系统 Python）。
@@ -61,21 +66,21 @@ func LocatePython(version string) (string, error) {
 	}
 	out, err := exec.Command(uvBin, "python", "find", version).Output()
 	if err != nil {
-		// 显式报错，避免静默回退系统 Python
 		return "", fmt.Errorf("uv python find %s failed: %w (ensure uv in PATH or OCTRUN_UV)", version, err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Start 启动插件子进程：解释器 = 托管 3.12，跑 manifest.Entry。
-func New(manifest Manifest, pythonPath string) *Plugin {
+func New(manifest Manifest) *Plugin {
 	return &Plugin{
 		ID:       manifest.ID,
 		Manifest: manifest,
 		pending:  make(map[int]chan protocol.Response),
+		exitCh:   make(chan struct{}),
 	}
 }
 
+// Start 启动插件子进程并开始读循环。解释器由调用方（Manager）解析。
 func (p *Plugin) Start(pythonPath string) error {
 	pyVersion := p.Manifest.Py3v
 	if pyVersion == "" {
@@ -94,57 +99,106 @@ func (p *Plugin) Start(pythonPath string) error {
 		return err
 	}
 	cmd.Stderr = os.Stderr
-
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	p.proc = cmd
-	p.stdin = stdin
-	p.stdout = stdout
-	p.alive = true
-	p.lastPong = time.Now()
+	if closer, err := applyMemLimit(cmd, p.Manifest.Limits.MemBytes); err == nil {
+		p.limitCloser = closer
+	}
 
+	p.prepare(cmd, stdout, stdin)
 	go p.readLoop()
-	go p.heartbeat()
 	return nil
 }
 
-// readLoop 逐行解析插件 stdout 的 JSON-RPC（插件 stdout 必须纯净为协议）。
-// 兼容两种方向：插件对宿主请求的 Response、插件主动发给内核的 Request（gate.*）。
+func (p *Plugin) prepare(cmd *exec.Cmd, stdoutPipe io.ReadCloser, stdinPipe io.WriteCloser) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.proc = cmd
+	p.stdin = stdinPipe
+	p.stdout = stdoutPipe
+	p.alive = true
+	p.lastPong = time.Now()
+	p.lastActivity = time.Now()
+	p.exitCode = -1
+}
+
+// readLoop 逐行解析插件 stdout（JSON-RPC）。任何成功读行都刷新 lastPong（活性）与 lastActivity。
+// 超长行（> limits.stdout_line_bytes）会被切断丢弃而不终止读循环；EOF 触发回收与 onExit。
 func (p *Plugin) readLoop() {
-	sc := bufio.NewScanner(p.stdout)
-	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for sc.Scan() {
-		var raw map[string]json.RawMessage
-		if err := json.Unmarshal(sc.Bytes(), &raw); err != nil {
-			continue
-		}
-		if _, isReq := raw["method"]; isReq {
-			// 插件 → 内核 请求（gate 服务，FR-7/FR-10）
-			var req protocol.Request
-			if json.Unmarshal(sc.Bytes(), &req) != nil {
-				continue
-			}
-			p.dispatchGate(req.ID, req.Method, req.Params)
-			continue
-		}
-		var resp protocol.Response
-		if err := json.Unmarshal(sc.Bytes(), &resp); err != nil {
-			continue
-		}
-		if resp.ID == 0 {
-			continue
-		}
-		p.mu.Lock()
-		ch := p.pending[int(resp.ID)]
-		delete(p.pending, int(resp.ID))
-		p.mu.Unlock()
-		if ch != nil {
-			ch <- resp
-		}
+	maxLine := p.Manifest.Limits.StdoutLineBytes
+	if maxLine <= 0 {
+		maxLine = DefaultStdoutLineBytes
 	}
-	p.markDead()
+	sc := newStdioScanner(p.stdout, maxLine)
+	for {
+		line, eof := sc.Next()
+		if eof {
+			break
+		}
+		p.touch()
+		p.handleLine(line)
+	}
+	p.handleExit()
+}
+
+func (p *Plugin) handleLine(line []byte) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(line, &raw); err != nil {
+		return
+	}
+	if _, isReq := raw["method"]; isReq {
+		var req protocol.Request
+		if json.Unmarshal(line, &req) != nil {
+			return
+		}
+		p.dispatchGate(req.ID, req.Method, req.Params)
+		return
+	}
+	var resp protocol.Response
+	if err := json.Unmarshal(line, &resp); err != nil {
+		return
+	}
+	if resp.ID == 0 {
+		return
+	}
+	p.mu.Lock()
+	ch := p.pending[int(resp.ID)]
+	delete(p.pending, int(resp.ID))
+	p.mu.Unlock()
+	if ch != nil {
+		ch <- resp
+	}
+}
+
+// handleExit 进程退出：回收（Wait→exit code），唤醒 pending，回调 onExit。
+func (p *Plugin) handleExit() {
+	p.waitOnce.Do(func() {
+		if p.proc != nil {
+			_ = p.proc.Wait()
+			if p.proc.ProcessState != nil {
+				p.exitCode = p.proc.ProcessState.ExitCode()
+			}
+		}
+	})
+	p.mu.Lock()
+	p.alive = false
+	for id, ch := range p.pending {
+		ch <- protocol.NewError(int64(id), protocol.ErrPluginCrashed, nil)
+		delete(p.pending, id)
+	}
+	p.mu.Unlock()
+	close(p.exitCh)
+
+	p.onExitOnce.Do(func() {
+		if cb := p.onExit; cb != nil {
+			cb(true, p.exitCode) // crash=true：受监管期间退出（回收/举报给 Manager 决策）
+		}
+	})
+	if p.limitCloser != nil {
+		p.limitCloser()
+	}
 }
 
 // dispatchGate 处理插件对受保护服务的请求：先过权限位图，未授权统一 -32005。
@@ -182,7 +236,6 @@ func (p *Plugin) dispatchGate(id int64, method string, params []byte) {
 		_, err := os.Stat(pr.Path)
 		ok, result = true, map[string]any{"exists": err == nil}
 	case "registry.call":
-		// 阶段C：插件 A → 内核 → 插件 B 的跨插件调用（FR-8）
 		var pr struct {
 			Name   string          `json:"name"`
 			Params json.RawMessage `json:"params"`
@@ -207,7 +260,6 @@ func (p *Plugin) dispatchGate(id int64, method string, params []byte) {
 		}
 		ok, result = true, map[string]any{"ok": true, "result": resp.Result}
 	case "event.emit":
-		// 阶段E：插件 → 内核 → 宿主 事件广播
 		var pr struct {
 			Type string `json:"type"`
 			Data any    `json:"data"`
@@ -238,27 +290,14 @@ func (p *Plugin) writeGateReply(id int64, code int, ok bool, result, data any) {
 	}
 }
 
-func (p *Plugin) markDead() {
+func (p *Plugin) touch() {
 	p.mu.Lock()
-	p.alive = false
-	if p.proc != nil {
-		_ = p.proc.Process.Kill()
-	}
-	// 唤醒所有 pending，避免泄漏
-	for id, ch := range p.pending {
-		ch <- protocol.NewError(int64(id), protocol.ErrPluginCrashed, nil)
-		delete(p.pending, id)
-	}
+	p.lastPong = time.Now()
+	p.lastActivity = time.Now()
 	p.mu.Unlock()
 }
 
-func (p *Plugin) Alive() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.alive
-}
-
-// Call 向插件发一次性请求，阻塞等响应（带超时）。
+// Call 向插件发一次性请求，阻塞等响应（带超时）。发出即视为一次活动。
 func (p *Plugin) Call(method string, params any, timeout time.Duration) (protocol.Response, error) {
 	p.mu.Lock()
 	if !p.alive {
@@ -269,6 +308,7 @@ func (p *Plugin) Call(method string, params any, timeout time.Duration) (protoco
 	id := p.nextID
 	ch := make(chan protocol.Response, 1)
 	p.pending[id] = ch
+	p.lastActivity = time.Now()
 	req := protocol.Request{V: protocol.ProtocolVersion, JSONRPC: "2.0", ID: int64(id), Method: method}
 	if params != nil {
 		b, _ := json.Marshal(params)
@@ -281,18 +321,21 @@ func (p *Plugin) Call(method string, params any, timeout time.Duration) (protoco
 		return protocol.Response{}, err
 	}
 
+	var resp protocol.Response
+	var timeoutErr error
 	select {
-	case resp := <-ch:
+	case resp = <-ch:
 		return resp, nil
 	case <-time.After(timeout):
-		p.mu.Lock()
-		delete(p.pending, id)
-		p.mu.Unlock()
-		return protocol.Response{}, fmt.Errorf("plugin %s call %s timeout", p.ID, method)
+		timeoutErr = fmt.Errorf("plugin %s call %s timeout", p.ID, method)
 	}
+	p.mu.Lock()
+	delete(p.pending, id)
+	p.mu.Unlock()
+	return protocol.Response{}, timeoutErr
 }
 
-// Ping 向插件发心跳。
+// Ping 发送心跳（不更新 lastPong——活性以 pong/任何读行为准）。
 func (p *Plugin) Ping() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -304,47 +347,65 @@ func (p *Plugin) Ping() {
 	req := protocol.Request{V: protocol.ProtocolVersion, JSONRPC: "2.0", ID: int64(id), Method: "ping"}
 	b, _ := json.Marshal(req)
 	_, _ = p.stdin.Write(append(b, '\n'))
-	p.lastPong = time.Now()
 }
 
-func (p *Plugin) heartbeat() {
-	t := time.NewTicker(HeartbeatInterval)
-	defer t.Stop()
-	for range t.C {
-		if !p.Alive() {
-			return
-		}
-		p.Ping()
-	}
-}
-
-func (p *Plugin) Stop() {
+func (p *Plugin) Alive() bool {
 	p.mu.Lock()
-	v := p.alive
-	if p.proc != nil {
+	defer p.mu.Unlock()
+	return p.alive
+}
+
+// LastResponse 最近一次成功读行（活性）时间。
+func (p *Plugin) LastResponse() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastPong
+}
+
+// LastActivity 最近一次活动时间（空闲回收依据）。
+func (p *Plugin) LastActivity() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastActivity
+}
+
+// ExitCh 进程退出通知 channel（handleExit 后关闭）。
+func (p *Plugin) ExitCh() <-chan struct{} { return p.exitCh }
+
+// ExitCode 进程退出码（未退出时为 -1）。
+func (p *Plugin) ExitCode() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.exitCode
+}
+
+// PendingCount 进行中的业务请求数（空闲回收据此判断是否有在途请求）。
+func (p *Plugin) PendingCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.pending)
+}
+
+// Kill 强制终止进程并等待回收（读循环会在 EOF 后自行 handleExit/onExit）。
+func (p *Plugin) Kill() {
+	p.mu.Lock()
+	alive := p.alive
+	p.mu.Unlock()
+	if p.proc != nil && alive {
 		_ = p.proc.Process.Kill()
 	}
-	p.alive = false
-	p.mu.Unlock()
-	if v {
-		p.markDead()
-	}
-	// 等待进程真正退出、释放文件句柄（否则 Windows 删除 venv 会 Access denied）
-	p.waitExited(3 * time.Second)
 }
 
-// waitExited 等待进程回收，超时兜底。
-func (p *Plugin) waitExited(timeout time.Duration) {
-	if p.proc == nil {
-		return
+// Stop 停止：Kill + 等待读循环完成回收（进程真正退出、释放句柄，供 Install 时删 venv）。
+func (p *Plugin) Stop() {
+	p.mu.Lock()
+	alive := p.alive
+	p.mu.Unlock()
+	if p.proc != nil && alive {
+		_ = p.proc.Process.Kill()
 	}
-	done := make(chan struct{})
-	go func() {
-		_ = p.proc.Wait()
-		close(done)
-	}()
 	select {
-	case <-done:
-	case <-time.After(timeout):
+	case <-p.exitCh:
+	case <-time.After(3 * time.Second):
 	}
 }

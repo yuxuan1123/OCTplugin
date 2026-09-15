@@ -147,6 +147,29 @@
     .risk { color:var(--cinnabar); font-size:11px; font-weight:700; border:1px solid rgba(178,58,48,.35);
       border-radius:6px; padding:1px 6px; background:rgba(178,58,48,.06); letter-spacing:1px; }
 
+    /* ── 启动与资源 · 生命周期设置 ── */
+    .lc-presets { display:flex; gap:10px; margin:12px 0 4px; flex-wrap:wrap; }
+    .lc-presets button { flex:1 1 0; min-width:150px; }
+    .lc-toggle { display:flex; align-items:center; gap:10px; margin:10px 0; font-size:13px; color:var(--ink-soft); }
+    .lc-toggle input { accent-color:var(--cinnabar); width:16px; height:16px; }
+    .lc-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:6px; }
+    .lc-num { display:flex; flex-direction:column; gap:4px; }
+    .lc-num span { color:var(--ink-soft); font-size:12px; letter-spacing:1px; }
+    .lc-num input { width:100%; background:rgba(255,252,245,.5); border:1px solid var(--line); border-radius:10px;
+      padding:8px 12px; color:var(--ink); font-size:13px; font-family:inherit; }
+    .lc-num input:focus { outline:none; border-color:var(--ink-soft); }
+    select.lc-sel { background:rgba(255,252,245,.5); border:1px solid var(--line); border-radius:8px;
+      padding:5px 8px; color:var(--ink); font-family:inherit; font-size:12px; }
+    .lc-grp { margin:16px 0 8px; color:var(--ink-soft); font-size:12px; font-weight:700; letter-spacing:2px;
+      padding-bottom:4px; border-bottom:1px dashed var(--card-line); }
+    .lc-bo { justify-content:center; }
+    .lc-bo label { display:flex; align-items:center; gap:8px; color:var(--ink); font-size:12px; cursor:pointer; }
+    /* 单插件选择：搜索下拉组合框 */
+    .lc-pick { display:flex; flex-direction:column; gap:8px; margin:12px 0 2px; }
+    .lc-pick input { width:100%; background:rgba(255,252,245,.5); border:1px solid var(--line);
+      border-radius:10px; padding:9px 12px; color:var(--ink); font-size:13px; font-family:inherit; }
+    .lc-pick input:focus { outline:none; border-color:var(--ink-soft); }
+
     /* ── 命令面板（阶段D，FR-9） ── */
     #palette { position:fixed; inset:0; z-index:100; display:none;
       background:rgba(30,27,23,.32); backdrop-filter:blur(2px); align-items:flex-start; justify-content:center;
@@ -208,6 +231,30 @@
             <input id="cfgCache" type="text" placeholder="D:\Project\ElectronProject\OCTplugin\.cache" />
             <div class="row"><button id="btnSaveCfg">保存依赖源设置</button></div>
             <pre id="cfgResult">…</pre>
+          </div>
+          <div class="card">
+            <h2>启动与资源 · 全局策略</h2>
+            <div class="lc-toggle"><input id="gRecycle" type="checkbox"><span>启用空闲回收（非 `always` 插件空闲后回收）</span></div>
+            <div class="lc-toggle"><input id="gRestart" type="checkbox"><span>启用崩溃自动重启（指数退避 + 窗口限次）</span></div>
+            <div class="row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div class="lc-num"><span>空闲阈值（分钟）</span><input id="gIdleMin" type="number" min="1" step="1" placeholder="5"></div>
+              <div class="lc-num"><span>每插件内存上限（MB，0=不限）</span><input id="gMemM" type="number" min="0" step="64" placeholder="0"></div>
+            </div>
+            <div class="lc-presets">
+              <button class="outline" id="presetAlways">全常驻</button>
+              <button class="outline" id="presetCore">核心常驻+其余按需</button>
+              <button class="outline" id="presetLazy">全部按需</button>
+            </div>
+            <div class="box" id="lcGlobalResult">连接后加载…</div>
+          </div>
+          <div class="card" style="grid-column:1 / -1;">
+            <h2>启动与资源 · 单插件策略</h2>
+            <div class="lc-pick">
+              <input id="lcPick" type="text" list="lcPlugins" placeholder="搜索并选择插件名称或 ID…" autocomplete="off">
+              <datalist id="lcPlugins"></datalist>
+            </div>
+            <button class="mini" id="btnLcRefresh" style="margin-top:8px">刷新</button>
+            <div id="lcPerPluginBox"></div>
           </div>
         </div>
       </section>
@@ -361,15 +408,20 @@
     });
 
     // ── 阶段1 · 「添加插件」管理面板 ──
+    const PLUGIN_ROLE = {}; // pluginId -> 'core'|'others'（用于全局预设时区分核心/其余）
     async function refreshMgmt() {
       try {
         const r = await rpc("plugin.list", {});
         const list = r.plugins || [];
         $("mgmtList").innerHTML = list.length ? list.map(p =>
-          `<div class="perm"><input type="checkbox" data-pid="${p.pluginId}" data-type="${p.type}" data-ui="${p.ui && p.ui.type || ''}">` +
-          `<span>${p.name || p.pluginId}</span>` +
-          `<span style="color:var(--ink-faint);font-size:11px;margin-left:8px">${p.type}${p.ui && p.ui.type === 'web' ? ' · 网页UI' : ''}</span>` +
-          `<button class="mini" data-rm="${p.pluginId}">移除</button></div>`).join("")
+          `<div class="perm" style="flex-wrap:wrap"><span>
+            <input type="checkbox" data-pid="${p.pluginId}" data-type="${p.type}" data-ui="${p.ui && p.ui.type || ''}">
+            <span style="color:var(--ink)">${p.name || p.pluginId}</span>
+            <span style="color:var(--ink-faint);font-size:11px;margin-left:8px">${p.type}${p.ui && p.ui.type === 'web' ? ' · 网页UI' : ''}</span>
+          </span>
+          <button class="mini" data-rm="${p.pluginId}">移除</button>
+          <button class="mini" data-lc="${p.pluginId}">启动·策略</button></div>
+          <div class="lc-edit" id="lceedit-${p.pluginId}" style="display:none;padding:6px 12px 14px;"></div>`).join("")
           : "（暂无插件）";
         $("mgmtList").querySelectorAll("[data-rm]").forEach(b => b.onclick = async (e) => {
           e.stopPropagation();
@@ -377,8 +429,215 @@
           try { await rpc("plugin.remove", { pluginId: b.dataset.rm }); $("mgmtLog").textContent = "已移除 " + b.dataset.rm; refreshMgmt(); }
           catch (err) { $("mgmtLog").textContent = "移除失败：" + err.message; }
         });
+        $("mgmtList").querySelectorAll("[data-lc]").forEach(b => b.onclick = () => toggleLifecycleEditor(b.dataset.lc));
+        // 载入全部插件生命周期，用于引用标记
+        for (const p of list) PLUGIN_ROLE[p.pluginId] = r._core && r._core.includes(p.pluginId) ? 'core' : 'others';
       } catch (e) { $("mgmtList").textContent = "读取失败：" + e.message; }
     }
+    // 单插件生命周期编辑器：拉取视图渲染表单，保存调 plugin.updateSettings
+    // 挂在指定容器 box 下；id 唯一前缀用于多容器（管理列表 / 设置列表）复用。
+    async function toggleLifecycleEditor(id, box, force) {
+      box = box || $("lceedit-" + id);
+      if (!force) {
+        const show = box.style.display === "none";
+        box.style.display = show ? "block" : "none";
+        if (!show) return;
+      }
+      box.style.display = "block";
+      box.innerHTML = "读取中…";
+      let view;
+      try { view = await rpc("plugin.getLifecycle", { pluginId: id }); }
+      catch (e) { box.innerHTML = `<span class="risk">读取失败：${e.message}</span>`; return; }
+      const eff = view.effective || {};
+      const st = eff.startup || {}, hb = eff.heartbeat || {}, rc = eff.recycle || {};
+      const lim = eff.limits || {}, res = eff.resilience || {};
+      const P = "lc-" + (box.id || "x") + "-" + id;
+      const curMode = eff.load_mode || "prewarm";
+      const grp = (t) => `<div class="lc-grp">${t}</div>`;
+      box.innerHTML = `
+        ${grp("启动")}
+        <div class="lc-grid">
+          <div class="lc-num"><span>加载模式</span><select class="lc-sel" id="${P}-mode">${["always","prewarm","lazy","disabled"].map(m=>`<option value="${m}" ${curMode===m?"selected":""}>${{always:"常驻 always",prewarm:"预热 prewarm",lazy:"按需 lazy",disabled:"禁用 disabled"}[m]}</option>`).join("")}</select></div>
+          <div class="lc-num"><span>预热池大小</span><input id="${P}-prewarm" type="number" min="0" step="1" value="${st.prewarm_pool||0}"></div>
+          <div class="lc-num lc-bo"><label><input id="${P}-keepalive" type="checkbox" ${eff.startup&&eff.startup.keep_alive?"checked":""}><span>常驻锁（即便允许回收也常驻）</span></label></div>
+        </div>
+        ${grp("心跳保活（秒）")}
+        <div class="lc-grid">
+          <div class="lc-num"><span>心跳间隔</span><input id="${P}-hbint" type="number" min="1" step="1" value="${(hb.interval_ms||0)/1000}"></div>
+          <div class="lc-num"><span>超时判定</span><input id="${P}-hbtout" type="number" min="1" step="1" value="${(hb.timeout_ms||0)/1000}"></div>
+        </div>
+        ${grp("空闲回收")}
+        <div class="lc-grid">
+          <div class="lc-num"><span>空闲阈值（分钟，0=不回收）</span><input id="${P}-idle" type="number" min="0" step="1" value="${(rc.max_idle_ms||0)/60000}"></div>
+          <div class="lc-num"><span>优雅关闭时限（秒）</span><input id="${P}-grace" type="number" min="0" step="1" value="${(rc.graceful_shutdown_ms||0)/1000}"></div>
+          <div class="lc-num lc-bo"><label><input id="${P}-recycle" type="checkbox" ${rc.idle_recycle?"checked":""}><span>允许空闲回收</span></label></div>
+          <div class="lc-num lc-bo"><label><input id="${P}-bgtask" type="checkbox" ${rc.background_tasks?"checked":""}><span>有后台任务（跳过回收）</span></label></div>
+        </div>
+        ${grp("崩溃自愈 / 退避")}
+        <div class="lc-grid">
+          <div class="lc-num"><span>窗口内最大重启次数</span><input id="${P}-maxrst" type="number" min="0" step="1" value="${res.max_restarts||0}"></div>
+          <div class="lc-num"><span>计数窗口（秒）</span><input id="${P}-winms" type="number" min="1" step="1" value="${(res.max_restarts_window_ms||0)/1000}"></div>
+          <div class="lc-num"><span>退避基数（秒）</span><input id="${P}-bkbase" type="number" min="0" step="1" value="${(res.backoff_base_ms||0)/1000}"></div>
+          <div class="lc-num"><span>退避上限（秒）</span><input id="${P}-bkmax" type="number" min="0" step="1" value="${(res.backoff_max_ms||0)/1000}"></div>
+          <div class="lc-num"><span>正常退出码（逗号分隔）</span><input id="${P}-crashcodes" type="text" placeholder="0,1" value="${(res.crash_exit_codes||[]).join(",")}"></div>
+          <div class="lc-num lc-bo"><label><input id="${P}-restart" type="checkbox" ${res.auto_restart?"checked":""}><span>崩溃自动重启</span></label></div>
+        </div>
+        ${grp("资源限制")}
+        <div class="lc-grid">
+          <div class="lc-num"><span>内存上限（MB，0=不限）</span><input id="${P}-mem" type="number" min="0" step="64" value="${Math.round((lim.mem_bytes||0)/1048576)}"></div>
+          <div class="lc-num"><span>CPU 上限（%，0=不限）</span><input id="${P}-cpu" type="number" min="0" max="100" step="1" value="${lim.cpu_percent||0}"></div>
+          <div class="lc-num"><span>单请求超时（秒，0=默认）</span><input id="${P}-req" type="number" min="0" step="1" value="${(lim.request_timeout_ms||0)/1000}"></div>
+          <div class="lc-num"><span>stdout 单行上限（KB，默认 8192）</span><input id="${P}-line" type="number" min="1" step="64" value="${(lim.stdout_line_bytes||0)/1024}"></div>
+        </div>
+        <div class="row">
+          <button data-save="1">保存并重启</button>
+          <button class="outline" data-reset="1">恢复默认</button>
+          <span data-lcmsg style="font-size:12px;color:var(--ink-soft)"></span>
+        </div>`;
+      // 事件委托：无论 box 何时被重渲染，点击都能命中（避免复用/竞态导致 onclick 未绑定或丢失）
+      if (!box.__lcDeleg) {
+        box.__lcDeleg = true;
+        box.addEventListener("click", (e) => {
+          const t = e.target;
+          const id = box.__lcId;
+          if (!id) return;
+          if (t && t.dataset && t.dataset.save) doSave(id);
+          else if (t && t.dataset && t.dataset.reset) doReset(id);
+        });
+      }
+      box.__lcId = id;
+      function msg(m) { const el = box.querySelector("[data-lcmsg]"); if (el) el.textContent = m; }
+      async function doReset() {
+        msg("恢复中…");
+        try {
+          await rpc("plugin.updateSettings", { pluginId: id, override: {} });
+          msg("已恢复 manifest 默认并重启。");
+          loadPerPluginList(); if (typeof refreshMgmt === "function") refreshMgmt();
+        } catch (e) { msg("失败：" + e.message); }
+      }
+      async function doSave() {
+        msg("保存中…");
+        try {
+          const g = (q) => box.querySelector("#lc-" + (box.id || "x") + "-" + id + "-" + q);
+          const num = (q, unit) => { const v = g(q); if (!v) return null; const n = parseInt(v.value || "0", 10); if (isNaN(n) || n === 0) return null; return unit ? n * unit : n; };
+          const codes = (g("crashcodes").value || "").split(",").map(s=>parseInt(s.trim(),10)).filter(n=>!isNaN(n));
+          const override = {
+            load_mode: g("mode").value,
+            prewarm_pool: num("prewarm", 1),
+            keep_alive: g("keepalive").checked,
+            heartbeat_interval_ms: num("hbint", 1000),
+            heartbeat_timeout_ms: num("hbtout", 1000),
+            idle_recycle: g("recycle").checked,
+            max_idle_ms: num("idle", 60000),
+            graceful_shutdown_ms: num("grace", 1000),
+            background_tasks: g("bgtask").checked,
+            max_restarts: num("maxrst", 1),
+            max_restarts_window_ms: num("winms", 1000),
+            backoff_base_ms: num("bkbase", 1000),
+            backoff_max_ms: num("bkmax", 1000),
+            crash_exit_codes: codes.length ? codes : null,
+            auto_restart: g("restart").checked,
+            mem_bytes: num("mem", 1048576),
+            cpu_percent: num("cpu", 1),
+            request_timeout_ms: num("req", 1000),
+            stdout_line_bytes: g("line") ? num("line", 1024) : null,
+          };
+          const r = await rpc("plugin.updateSettings", { pluginId: id, override });
+          msg(`已保存并${g("mode").value === "disabled" ? "停止" : "重启"} · 状态 ${r.state}`);
+          if (typeof refreshMgmt === "function") refreshMgmt();
+        } catch (err) { console.error("save", id, err); msg("失败：" + (err && err.message || err)); }
+      }
+    }
+    // 设置面板·单插件策略列表：每个插件一行汇总（模式/回收/重启/状态），点「编辑」展开编辑器
+    const LC_INDEX = {}; // 插件显示名 -> id，供输入框解析
+    async function loadPerPluginList(preserveSel) {
+      const input = $("lcPick"), dl = $("lcPlugins");
+      if (!input) return;
+      try {
+        const list = (await rpc("plugin.list", {})).plugins || [];
+        LC_INDEX.__all = list;
+        dl.innerHTML = list.map(p => `<option value="${p.name || p.pluginId}（${p.pluginId}）"></option>`).join("");
+        // 保留之前选中
+        if (preserveSel && input._sel) renderSinglePlugin(input._sel);
+      } catch (e) { dl.innerHTML = ""; }
+    }
+    // 输入框解析：支持「名称（id）」「id」「部分名称/id 前缀»，返回命中插件或 null
+    function resolveLC(raw) {
+      const v = (raw || "").trim();
+      if (!v) return null;
+      const all = LC_INDEX.__all || [];
+      // 1) 精确：独立 id
+      let hit = all.find(p => p.pluginId === v);
+      if (hit) return hit;
+      // 2) 「名称（id）」/「名称(id)」：剥离括号取 id
+      const m = v.match(/[（(]([^）)]+)[）)]\s*$/);
+      if (m) { hit = all.find(p => p.pluginId === m[1]); if (hit) return hit; }
+      // 3) 部分匹配：名称或 id 开头/包含（数字前缀优先 id）
+      const lv = v.toLowerCase();
+      hit = all.find(p => p.pluginId.toLowerCase().startsWith(lv)) ||
+            all.find(p => (p.name || "").toLowerCase().startsWith(lv)) ||
+            all.find(p => (p.pluginId + " " + (p.name || "")).toLowerCase().includes(lv));
+      return hit || null;
+    }
+    // 针对某个插件：先显示一行当前配置摘要，再挂全部进程配置编辑器
+    async function renderSinglePlugin(id) {
+      const box = $("lcPerPluginBox");
+      const input = $("lcPick"); if (input) input._sel = id;
+      box.innerHTML = "读取中…";
+      let v;
+      try { v = await rpc("plugin.getLifecycle", { pluginId: id }); }
+      catch (e) { box.innerHTML = `<span class="risk">读取失败：${e.message}</span>`; return; }
+      const eff = v.effective || {}; const rc = eff.recycle || {}; const st = eff.startup || {};
+      const hb = eff.heartbeat || {}; const lim = eff.limits || {}; const res = eff.resilience || {};
+      const mode = {always:"常驻",prewarm:"预热",lazy:"按需",disabled:"禁用"}[eff.load_mode] || eff.load_mode;
+      const over = v.override || {};
+      const hasOver = Object.keys(over).some(k => over[k] !== null && over[k] !== undefined && over[k] !== "");
+      const summary = `<div class="box" style="margin:10px 0;">当前：${mode} · 空闲${rc.idle_recycle ? "回收" : "不回收"} · ${res.auto_restart ? "自动重启" : "不自重启"} · 状态 ${v.state}${hasOver ? " · <span style='color:var(--cinnabar)'>已覆盖</span>" : ""}</div>`;
+      box.innerHTML = summary + `<div id="lceeds-sel"></div>`;
+      await toggleLifecycleEditor(id, $("lceeds-sel"), true); // 选中即强制渲染表单
+    }
+    // 组合框交互：输入联想（blur 解析、回车解析、datalist 由浏览器原生提供）
+    function wirePluginPicker() {
+      const input = $("lcPick");
+      // 仅当解析出的插件与当前已渲染的不同时才重建表单。
+      // 避免点“保存/恢复”按钮时先触发 blur → 重建整个 box 替换按钮 → 吞掉该次点击。
+      const apply = () => {
+        const hit = resolveLC(input.value);
+        if (hit && hit.pluginId !== input._sel) renderSinglePlugin(hit.pluginId);
+      };
+      input.addEventListener("change", apply);
+      input.addEventListener("blur", apply);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
+    }
+    // 全局预设：把 load_mode 批量应用到所有插件（保留用户对某个插件已设的其他覆盖）
+    async function applyGlobalPreset(mode, opts) {
+      $("lcGlobalResult").textContent = "应用中…";
+      try {
+        const list = (await rpc("plugin.list", {})).plugins || [];
+        const idleMin = Math.max(parseInt($("gIdleMin").value || "5", 10), 1);
+        const memM = parseInt($("gMemM").value || "0", 10);
+        let done = 0;
+        for (const p of list) {
+          const isCore = PLUGIN_ROLE[p.pluginId] === "core";
+          let loadMode = mode;
+          if (mode === "core-others" && !isCore) loadMode = "lazy"; // presetCore → 其余按需
+          const override = {
+            load_mode: loadMode,
+            idle_recycle: opts.recycle !== undefined ? opts.recycle : !!$("gRecycle").checked,
+            max_idle_ms: idleMin * 60000,
+            mem_bytes: memM ? memM * 1048576 : 0,
+            auto_restart: opts.restart !== undefined ? opts.restart : !!$("gRestart").checked,
+          };
+          try { await rpc("plugin.updateSettings", { pluginId: p.pluginId, override }); done++; }
+          catch (e) { /* 跳过单个失败 */ }
+        }
+        $("lcGlobalResult").textContent = `已应用到 ${done}/${list.length} 个插件。`;
+      } catch (e) { $("lcGlobalResult").textContent = "失败：" + e.message; }
+    }
+    $("presetAlways").onclick = () => applyGlobalPreset("always", {});
+    $("presetCore").onclick = () => applyGlobalPreset("core-others", {});
+    $("presetLazy").onclick = () => applyGlobalPreset("lazy", {});
+    $("btnLcRefresh").onclick = () => loadPerPluginList(true);
     $("btnMgmtRefresh").onclick = refreshMgmt;
     $("btnPick").onclick = async () => {
       try {
@@ -416,6 +675,8 @@
       loadDepCfg();
       refreshFns();
       refreshMgmt();
+      wirePluginPicker(); // 搜索+下拉选择交互（只挂一次，loadPerPluginList 只重建选项）
+      loadPerPluginList();
     });
 
     async function loadDepCfg() {
