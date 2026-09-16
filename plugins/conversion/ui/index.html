@@ -3,55 +3,112 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>转换</title>
+  <title>格式转换</title>
   <link rel="stylesheet" href="/res/theme/plugin.css" />
   <style>
-    /* ══ 转换 · 单位换算 · 国风墨水 ══
-       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+    /* ══ 格式转换 · 文档互转 · 国风墨水 ══
+       复刻 OCTools 五卡布局：输入 → 目标格式(二级选择器) → 输出 → 开始转换 → 日志 */
     html{ height:100%; overflow:hidden; }
     body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden;
       padding:22px; background:transparent; color:var(--ink); font-family:var(--font); }
 
     .card{ flex:0 0 auto; }
-    .card h3{ display:flex; align-items:center; gap:8px; }
-    .card h3 .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+    .card h3 .sub-tag{ margin-left:auto; font-size:11px; font-weight:400; color:var(--ink-faint);
+      letter-spacing:1px; }
 
-    /* 表单：类别 / 从 / 目标 / 数值 */
     .form-grid{ display:grid; gap:12px; }
 
-    .field select{ width:100%; background:rgba(255,252,245,.55); border:1px solid var(--line);
-      border-radius:9px; padding:9px 12px; color:var(--ink); font-family:var(--font);
-      font-size:14px; outline:none; cursor:pointer; }
-    .field select:focus{ border-color:var(--gold); }
+    /* 字段行 */
+    .field label{ display:block; font-size:12px; color:var(--ink-soft); letter-spacing:2px;
+      margin-bottom:6px; }
+    .field input{ width:100%; box-sizing:border-box; background:rgba(255,252,245,.55);
+      border:1px solid var(--line); border-radius:9px; padding:9px 12px; color:var(--ink);
+      font-family:var(--font); font-size:14px; outline:none; }
+    .field input:focus{ border-color:var(--gold); }
+    .field input::placeholder{ color:var(--ink-faint); }
 
-    .num-row{ display:flex; gap:10px; }
-    .num-row input{ flex:1; background:rgba(255,252,245,.55); border:1px solid var(--line);
-      border-radius:9px; padding:9px 12px; color:var(--ink); font-family:Consolas,'Courier New',monospace;
-      font-size:15px; outline:none; }
-    .num-row input:focus{ border-color:var(--gold); }
+    .row{ display:flex; gap:10px; align-items:flex-end; }
+    .row .field{ flex:1; }
+    .row .field.fix{ flex:0 0 auto; }
+    .row .btn{ flex:0 0 auto; white-space:nowrap; }
 
-    /* 目标结果 */
-    .result-box{ margin-top:14px; display:flex; align-items:center; gap:12px;
-      flex-wrap:wrap; }
-    .result-val{ font-family:Consolas,'Courier New',monospace; font-size:22px; font-weight:700;
-      letter-spacing:1px; color:var(--ink); word-break:break-all; }
-    .result-unit{ font-size:14px; color:var(--ink-soft); letter-spacing:1px; }
+    .hint{ font-size:12px; color:var(--ink-soft); letter-spacing:1px; margin-top:6px; }
 
-    /* 全量结果表 */
-    table{ width:100%; border-collapse:collapse; margin-top:6px; }
-    th{ text-align:left; font-size:12px; color:var(--ink-soft); letter-spacing:2px;
-      padding:8px 10px; border-bottom:1px solid var(--line); font-weight:700; }
-    td{ padding:8px 10px; border-bottom:1px solid var(--line); font-size:14px; }
-    tr:last-child td{ border-bottom:none; }
-    tr:hover td{ background:rgba(168,135,90,.06); }
-    .td-unit{ color:var(--ink-soft); font-size:13px; letter-spacing:1px; white-space:nowrap; }
-    .td-num{ font-family:Consolas,'Courier New',monospace; font-size:13.5px;
-      cursor:pointer; border-radius:6px; padding:2px 6px; transition:background .15s; }
-    .td-num:hover{ background:var(--code); }
-    .copy-hint{ font-size:11px; color:var(--ink-faint); letter-spacing:1px; margin-top:6px; }
+    /* ── 二级选择器：分类按钮 + 格式芯片 ── */
+    .picker{ margin-top:6px; }
+    .cats{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+    .cat-btn{ border:1px solid var(--line); background:rgba(255,252,245,.5); color:var(--ink-soft);
+      padding:6px 14px; border-radius:8px; font-size:13px; font-weight:700; letter-spacing:2px;
+      cursor:pointer; font-family:var(--font); transition:all .15s; }
+    .cat-btn:hover{ border-color:var(--gold); color:var(--ink); }
+    .cat-btn.active{ background:var(--ink); color:#FBF7EE; border-color:var(--ink); }
 
-    .sub{ color:var(--ink-soft); font-size:12px; letter-spacing:1px; }
-    .hint{ margin-top:8px; font-size:12px; color:var(--ink-soft); letter-spacing:1px; }
+    .chips{ display:flex; flex-wrap:wrap; gap:6px; }
+    .chip{ border:1px solid var(--line); background:rgba(255,252,245,.5); color:var(--ink);
+      padding:6px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;
+      letter-spacing:1px; font-family:Consolas,'Courier New',monospace; transition:all .15s; }
+    .chip:hover{ border-color:var(--gold); }
+    .chip:disabled{ opacity:.35; cursor:not-allowed; text-decoration:none; }
+    .chip.active{ background:var(--gold); color:#FBF7EE; border-color:var(--gold); }
+
+    .picker-hint{ font-size:12px; color:var(--ink-faint); letter-spacing:1px; margin-top:8px; }
+
+    /* ── 预设区（按转换对显隐） ── */
+    .preset-area{ margin-top:4px; padding-top:12px; border-top:1px dashed var(--line); }
+    .preset-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .preset-row .lbl{ font-size:12px; color:var(--ink-soft); letter-spacing:2px; }
+    .preset-row select{ background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:8px 12px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none; cursor:pointer; }
+    .preset-row input{ background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:8px 12px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none; box-sizing:border-box; }
+    .preset-row input:focus,.preset-row select:focus{ border-color:var(--gold); }
+    .preset-row input[type="text"]{ min-width:120px; }
+    .preset-row input[type="number"]{ width:72px; }
+    .preset-row .preset-head{ font-size:13px; font-weight:700; color:var(--ink);
+      letter-spacing:2px; }
+    .preset-note{ font-size:12px; color:var(--ink-faint); letter-spacing:1px; }
+
+    /* ── 开始转换 CTA ── */
+    .convert-cta{ width:100%; min-height:48px; background:var(--gold); color:#FBF7EE;
+      border:none; border-radius:8px; font-size:15px; font-weight:700; letter-spacing:3px;
+      cursor:pointer; font-family:var(--font); transition:filter .15s; }
+    .convert-cta:hover:not(:disabled){ filter:brightness(1.07); }
+    .convert-cta:disabled{ opacity:.5; cursor:not-allowed; }
+
+    /* ── 参数弹窗 ── */
+    .param-btn{ cursor:pointer; white-space:nowrap; }
+    .modal-mask{ position:fixed; inset:0; display:none; align-items:flex-start; justify-content:center;
+      background:rgba(30,27,23,.45); z-index:80; padding:48px 20px; }
+    .modal{ width:min(660px, 94vw); max-height:80vh; overflow:hidden; display:flex; flex-direction:column;
+      background:#FBF7EE; border:1px solid var(--line); border-radius:14px;
+      box-shadow:0 14px 44px rgba(0,0,0,.28); }
+    .modal-head{ display:flex; align-items:center; gap:10px; padding:13px 18px;
+      border-bottom:1px dashed var(--line); }
+    .modal-title{ font-size:15px; font-weight:700; letter-spacing:2px; color:var(--ink); }
+    .modal-x{ margin-left:auto; background:none; border:none; cursor:pointer; font-size:22px;
+      line-height:1; color:var(--ink-soft); }
+    .modal-x:hover{ color:var(--ink); }
+    .modal-body{ overflow-y:auto; padding:16px 18px; }
+    .modal-body .preset-row{ margin-bottom:10px; align-items:center; }
+    .modal-foot{ display:flex; justify-content:flex-end; gap:10px; padding:13px 18px;
+      border-top:1px dashed var(--line); }
+    .btn.primary{ background:var(--gold); color:#FBF7EE; border:none; }
+
+    /* ── 日志区 ── */
+    .log{ min-height:160px; max-height:320px; overflow-y:auto; background:var(--code);
+      border:1px solid var(--card-line); border-radius:10px; padding:10px 14px;
+      font-family:Consolas,'Courier New',monospace; font-size:12px; line-height:1.7;
+      color:var(--ink); white-space:pre-wrap; word-break:break-all; }
+    .log .log-ok{ color:var(--celadon); }
+    .log .log-err{ color:var(--cinnabar); }
+
+    .state-badge{ font-size:11px; color:var(--ink-faint); letter-spacing:1px; margin-top:6px; }
+
+    /* 小图标 */
+    .ic{ display:inline-block; width:14px; height:14px; vertical-align:-2px; margin-right:4px;
+      background:var(--ink-faint); -webkit-mask:var(--ic); mask:var(--ic); }
 
     /* Toast（墨黑底） */
     .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
@@ -63,48 +120,83 @@
 </head>
 <body>
 
+  <!-- 卡片1：输入 -->
   <div class="card">
-    <h3><span class="dot"></span>单位换算</h3>
+    <h3>输入</h3>
     <div class="form-grid">
-      <div class="field">
-        <label>类别</label>
-        <select id="cat"></select>
+      <div class="row">
+        <div class="field"><label>源文件</label>
+          <input id="input-path" placeholder="选择源文件（单文件转换）…" />
+        </div>
+        <div class="field fix"><button class="btn" id="browse-input">浏览</button></div>
       </div>
       <div class="row">
-        <div class="field" style="flex:1"><label>从单位</label><select id="from"></select></div>
-        <div class="field" style="flex:1"><label>目标单位</label><select id="to"></select></div>
-      </div>
-      <div class="field">
-        <label>数值</label>
-        <div class="num-row">
-          <input id="value" type="number" step="any" placeholder="输入数值" />
-          <button class="btn" id="convert-btn">转换</button>
+        <div class="field"><label>源文件夹</label>
+          <input id="folder-path" placeholder="选择源文件夹（多文件逐个转换）…" />
         </div>
+        <div class="field fix"><button class="btn" id="browse-folder">浏览文件夹</button></div>
+      </div>
+      <div class="hint">（源文件与源文件夹二选一；多文件支持逐个转换，输出到「输出文件夹」）</div>
+      <div class="field" id="src-fmt-field" style="display:none">
+        <label>源文件格式</label>
+        <div class="picker" id="src-picker"></div>
       </div>
     </div>
   </div>
 
+  <!-- 卡片2：目标格式 -->
   <div class="card">
-    <h3><span class="dot"></span>转换结果</h3>
-    <div class="result-box" id="result-box">
-      <span class="result-val" id="result-val" title="点击复制">—</span>
-      <span class="result-unit" id="result-unit"></span>
-      <button class="btn ghost mini" id="copy-btn">一键复制结果</button>
+    <h3>目标格式</h3>
+    <div class="form-grid">
+      <div class="field">
+        <label>选择目标格式</label>
+        <div class="picker" id="dst-picker"></div>
+        <div class="picker-hint" id="dst-hint" style="display:none"></div>
+      </div>
+      <div class="preset-area" id="preset-area" style="display:none"></div>
     </div>
-    <div class="sub hint" id="result-empty">在上方选择单位并输入数值后点击「转换」。</div>
   </div>
 
+  <!-- 卡片3：输出 -->
   <div class="card">
-    <h3><span class="dot"></span>全部单位换算</h3>
-    <div class="copy-hint">点击任意数值即复制</div>
-    <table>
-      <thead><tr><th style="width:120px">单位</th><th>数值</th></tr></thead>
-      <tbody id="tbody"></tbody>
-    </table>
-    <div class="sub hint" id="table-empty">转换后将在此列出该数值在所有同类单位下的结果。</div>
+    <h3>输出</h3>
+    <div class="form-grid">
+      <div class="row">
+        <div class="field"><label>输出文件夹</label>
+          <input id="output-folder" placeholder="选择输出文件夹…" />
+        </div>
+        <div class="field fix"><button class="btn" id="browse-output">浏览文件夹</button></div>
+      </div>
+      <div class="hint" id="output-hint">（每个源文件转换后输出到此文件夹；单文件转换时自动推算文件名）</div>
+    </div>
+  </div>
+
+  <!-- 卡片4：开始转换 -->
+  <button class="convert-cta" id="convert-btn">开始转换</button>
+
+  <!-- 卡片5：转换日志 -->
+  <div class="card">
+    <h3>转换日志 <span class="sub-tag">可点复制</span></h3>
+    <div class="log" id="log">等待开始…</div>
+    <div class="state-badge" id="state"></div>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- 参数设置弹窗 -->
+  <div class="modal-mask" id="param-mask">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title" id="param-title">参数设置</span>
+        <button class="modal-x" id="param-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body" id="param-body"></div>
+      <div class="modal-foot">
+        <button class="btn" id="param-reset">恢复默认</button>
+        <button class="btn primary" id="param-ok">确定</button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
   <script src="ui.js"></script>

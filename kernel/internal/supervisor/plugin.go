@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +9,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/octplugin/kernel/internal/perms"
@@ -59,12 +59,15 @@ type Plugin struct {
 }
 
 // LocatePython 用 uv 定位托管解释器（only-managed，不依赖系统 Python）。
+// 带超时保护：uv 缺失/卡住时快速失败，不阻塞内核启动。
 func LocatePython(version string) (string, error) {
 	uvBin := "uv"
 	if v := os.Getenv("OCTRUN_UV"); v != "" {
 		uvBin = v
 	}
-	out, err := exec.Command(uvBin, "python", "find", version).Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, uvBin, "python", "find", version).Output()
 	if err != nil {
 		return "", fmt.Errorf("uv python find %s failed: %w (ensure uv in PATH or OCTRUN_UV)", version, err)
 	}
@@ -88,7 +91,7 @@ func (p *Plugin) Start(pythonPath string) error {
 	}
 	cmd := exec.Command(pythonPath, p.Manifest.Entry)
 	cmd.Dir = p.Manifest.Dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideConsoleWindow(cmd) // Windows: 不弹黑窗口；其它平台：空实现
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

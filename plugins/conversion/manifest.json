@@ -1,15 +1,20 @@
 {
   "id": "conversion",
-  "name": "转换",
-  "version": "1.0.0",
+  "name": "格式转换",
+  "version": "2.0.0",
   "type": "Python",
   "entry": "main.py",
+  "python_version": "3.12",
   "ui": { "type": "web", "entry": "ui/index.html" },
-  "load_mode": "always",
-  "permissions": [],
-  "dependencies": [],
+  "load_mode": "lazy",
+  "permissions": ["file_read", "file_write"],
+  "dependencies": [
+    { "path": "requirements.txt", "manager": "uv", "explicit": false }
+  ],
   "commands": [],
   "functions": [
-    { "name": "conversion.ping", "method": "ping", "desc": "转换页桥连通性" }
+    { "name": "conversion.ping", "method": "conversion.ping", "desc": "转换页桥连通性" },
+    { "name": "conversion.formats", "method": "conversion.formats", "desc": "两级选择器元数据 + 可达目标格式" },
+    { "name": "conversion.convert", "method": "conversion.convert", "desc": "单文件/文件夹批量转换" }
   ]
 }

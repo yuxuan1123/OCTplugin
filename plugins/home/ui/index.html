@@ -316,7 +316,7 @@
         : color === WRN ? 'color:#fff;background:#a8875a;border:none;'
         : 'color:#71717a;background:var(--paper-2);border:1px solid var(--card-line);';
     }
-    (function tickHero(){
+    function tickHero(){
       const d = new Date();
       const g = heroOf(d);
       $('heroTip').textContent = g.tip;
@@ -331,7 +331,8 @@
       $('heroHint').style.color = g.hintColor;
       $('dateLine').textContent = d.getFullYear() + ' 年 ' + two(d.getMonth()+1) + ' 月 ' + two(d.getDate()) + ' 日   星期' + '日一二三四五六'[d.getDay()];
       $('shichen').textContent = '当值 ' + shichen(d.getHours()) + ' 时';
-    })();
+    }
+    tickHero();
     setInterval(() => tickHero(), 1000);
 
     // ══ 入场（错落显现 · 仅延时，transform 由动画处理） ══

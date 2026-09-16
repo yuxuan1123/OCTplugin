@@ -4,7 +4,7 @@
   let ws = null;
   let seq = 0;
   const pending = new Map();
-  const selfId = location.pathname.split("/")[2] || "color_pick";
+  const selfId = location.pathname.split("/")[2] || "conversion";
 
   function rpc(method, params, timeout = 15000) {
     return new Promise((res, rej) => {

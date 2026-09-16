@@ -112,12 +112,23 @@ async function bootstrap() {
 }
 
 // renderer 通用 RPC 桥（授权/吊销/读文件等）
-ipcMain.handle("rpc", async (e, method, params) => rpc(method, params));
+ipcMain.handle("rpc", async (e, method, params, timeoutMs) => rpc(method, params, timeoutMs));
 
 // 阶段1：选择插件源目录（「添加插件」导入用）
 ipcMain.handle("dialog:pickDir", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     title: "选择插件源目录", properties: ["openDirectory"],
+  });
+  if (canceled || !filePaths.length) return { canceled: true };
+  return { canceled: false, path: filePaths[0] };
+});
+
+// 文件对话框：供插件选择单个文件（如格式转换的源文件）；filters=[{name,extensions}]
+ipcMain.handle("dialog:pickFile", async (e, filters) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: "选择文件",
+    properties: ["openFile"],
+    filters: (filters && filters.length ? filters : null) || [{ name: "所有文件", extensions: ["*"] }],
   });
   if (canceled || !filePaths.length) return { canceled: true };
   return { canceled: false, path: filePaths[0] };
@@ -164,7 +175,9 @@ function startKernel() {
     kernelProc.on("exit", (code) => {
       if (buf.indexOf("\n") < 0) reject(new Error(`内核提前退出 code=${code}`));
     });
-    setTimeout(() => reject(new Error("等待内核 auth 超时")), 5000);
+    // 内核在 StartAll 期间会做依赖就绪探测（亚秒~15s 上限），auth 只在其后打印；
+    // 5s 过短会误判。60s 覆盖首次依赖探测/下载，避免启动偶发超时。
+    setTimeout(() => reject(new Error("等待内核 auth 超时")), 60000);
   });
 }
 
@@ -185,11 +198,11 @@ function connect(auth) {
   });
 }
 
-function rpc(method, params) {
+function rpc(method, params, timeoutMs) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     ws.send(JSON.stringify({ v: 1, jsonrpc: "2.0", id, method, params }));
-    const timer = setTimeout(() => { ws.off("message", onMsg); reject(new Error("RPC 超时: " + method)); }, 15000);
+    const timer = setTimeout(() => { ws.off("message", onMsg); reject(new Error("RPC 超时: " + method)); }, timeoutMs || 15000);
     const onMsg = (m) => {
       const msg = JSON.parse(m.toString());
       if (msg.id !== id) return;

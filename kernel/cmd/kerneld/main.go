@@ -17,16 +17,22 @@ import (
 )
 
 func main() {
-	root, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	// 项目根 = 内核二进制所在目录的上一级（.../kernel/ → 项目根）。
+	// 依赖隔离 deps/<id>、宿主 host、store 等均以项目根为基准（见 environment.md）。
+	bin := os.Args[0]
+	if exe, e2 := os.Executable(); e2 == nil && exe != "" {
+		bin = exe
+	}
+	root, err := filepath.Abs(filepath.Dir(filepath.Dir(bin)))
 	if err != nil {
 		root, _ = os.Getwd()
 	}
 	// 内核 stdout 只用于输出 auth 行（D8），其余日志一律走 stderr。
 	log.SetOutput(os.Stderr)
 
-	pluginsDir := filepath.Join(root, "..", "plugins")
-	storeDir := filepath.Join(root, "..", "store")
-	resourcesDir := filepath.Join(filepath.Dir(root), "resources") // 阶段E：共享资源根目录
+	pluginsDir := filepath.Join(root, "plugins")
+	storeDir := filepath.Join(root, "store")
+	resourcesDir := filepath.Join(root, "resources") // 阶段E：共享资源根目录
 
 	// 授权持久化 store/perms.json（阶段A）
 	gate := perms.NewGate(filepath.Join(storeDir, "perms.json"))
@@ -60,7 +66,8 @@ func main() {
 		installer.SetCacheDir(v)
 	}
 	manager.SetVenvResolver(installer.VenvPython)
-	manager.SetNodeResolver(installer.NodeInterp) // 阶段F：Node 插件用 node 解释器
+	manager.SetDepsReadyResolver(installer.RequirementsSatisfied) // 依赖就绪判定（导入探测）
+	manager.SetNodeResolver(installer.NodeInterp)                 // 阶段F：Node 插件用 node 解释器
 
 	token := newToken(32)
 	srv := ipc.NewServer(token, manager, gate, installer, resourcesDir, pluginsDir)
@@ -70,11 +77,14 @@ func main() {
 		log.Fatalf("listen: %v", err)
 	}
 
-	manager.StartAll()
-	defer manager.StopAll()
-	// 每个插件实例启动（含懒启动/退避重启的新实例）都注入事件广播出口。
+	// 事件广播/状态回调先装配好，供随后异步启动的插件实例使用。
+	manager.SetOnState(func(id, state string) { srv.NotifyState(id, state) })
 	manager.SetOnSpawn(func(p *supervisor.Plugin) { p.Event = srv.EventSink() })
-	srv.WireEvents() // 阶段E：立即运行中的插件也补注事件出口（与 StartAll 前保持兼容）
+	srv.WireEvents()
+	defer manager.StopAll()
+
+	// 同步快速登记全部插件：plugin.list / 侧栏「注册表预显示」在 auth 前即完整。
+	manager.RegisterAll()
 
 	go srv.Serve(ln)
 
@@ -82,6 +92,9 @@ func main() {
 		"auth": map[string]any{"port": port, "token": token},
 	})
 	fmt.Println(string(auth))
+	// 插件异步、逐插件并发启动：不阻塞 auth；各插件状态经 plugin.state 事件
+	// 实时推送（灰色→启动→运行），单个插件依赖卡住不影响其他插件与整体 UI。
+	go manager.StartAll()
 	// 阻塞
 	select {}
 }

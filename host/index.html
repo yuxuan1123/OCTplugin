@@ -95,7 +95,12 @@
     .side-btn.active { color:var(--ink); font-weight:700;
       background:var(--card); border-color:var(--card-line); box-shadow:var(--shadow);
       border-left:3px solid var(--cinnabar); padding-left:12px; }
-    .side-btn.active .dot { background:var(--cinnabar); }
+    .side-btn.running .dot { background:var(--ink); } /* 已启动（黑） */
+    .side-btn.active .dot { background:var(--cinnabar); } /* 当前页面（红），优先级高于运行状态 */
+    .side-btn.starting .dot { background:var(--gold, #a8875a); animation:dotPulse 1s ease-in-out infinite; } /* 加载中（金/呼吸） */
+    @keyframes dotPulse { 0%,100%{opacity:.35; transform:scale(.8)} 50%{opacity:1; transform:scale(1.15)} }
+    .side-btn.disabled { color:var(--ink-faint); } /* 已禁用的插件：整体淡化+名称划线 */
+    .side-btn.disabled .name { text-decoration:line-through; text-decoration-color:var(--ink-faint); }
 
     /* 右侧内容 */
     .main { flex:1; min-width:0; min-height:0; overflow-y:auto; padding:24px; position:relative; }
@@ -232,6 +237,22 @@
             <div class="row"><button id="btnSaveCfg">保存依赖源设置</button></div>
             <pre id="cfgResult">…</pre>
           </div>
+          <div class="card" style="grid-column:1 / -1;">
+            <h2>插件排序 · 默认页</h2>
+            <div class="row" style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;">
+              <label>默认打开的插件页</label>
+              <select id="defPageSel"></select>
+            </div>
+            <label style="margin-top:10px">侧栏插件顺序（上移/下移调整，未列出的自动排后）</label>
+            <ul id="orderList" style="list-style:none;margin:6px 0;padding:0;max-height:230px;overflow:auto;border:1px solid var(--line, #e4ddd2);border-radius:8px;"></ul>
+            <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+              <button class="mini" id="btnOrderUp">上移</button>
+              <button class="mini" id="btnOrderDown">下移</button>
+              <button class="outline" id="btnOrderReset">恢复默认（home 置首）</button>
+              <button id="btnOrderSave">保存排序与默认页</button>
+            </div>
+            <div class="box" id="orderResult">连接后可配置。</div>
+          </div>
           <div class="card">
             <h2>启动与资源 · 全局策略</h2>
             <div class="lc-toggle"><input id="gRecycle" type="checkbox"><span>启用空闲回收（非 `always` 插件空闲后回收）</span></div>
@@ -293,12 +314,25 @@
           </div>
           <div class="card">
             <h2>插件依赖（隔离环境）</h2>
+            <div class="lc-pick">
+              <input id="depPick" type="text" list="depPlugins" placeholder="搜索并选择插件名称或 ID…" autocomplete="off">
+              <datalist id="depPlugins"></datalist>
+              <button class="mini" id="btnDepRefresh">刷新</button>
+            </div>
             <div class="box" id="depArea">连接后加载…</div>
             <div class="row">
               <button class="outline" id="btnDeps">预览依赖</button>
               <button id="btnInstall">安装并重启</button>
             </div>
             <pre id="depResult">…</pre>
+          </div>
+          <div class="card">
+            <h2>已安装库及版本</h2>
+            <div class="row">
+              <button id="btnEnvs">刷新已安装库</button>
+              <button class="outline" id="btnEnvsClear">清空</button>
+            </div>
+            <pre id="envsResult" style="max-height:340px;overflow:auto">点击“刷新已安装库”查看项目托管 Python、各插件 venv 与 Electron 宿主的已装库及版本…</pre>
           </div>
           <div class="card">
             <h2>共享函数 <button class="mini" id="btnRegRefresh">刷新</button></h2>
@@ -332,7 +366,7 @@
     const { ipcRenderer } = require("electron");
     const $ = (id) => document.getElementById(id);
     const setStatus = (t, c) => { $("status").textContent = t; $("status").className = "status " + c; };
-    const rpc = (m, p) => ipcRenderer.invoke("rpc", m, p);
+    const rpc = (m, p, t) => ipcRenderer.invoke("rpc", m, p, t);
     const $$ = (sel) => document.querySelectorAll(sel);
 
     // ── 自绘窗口控制（frame:false 无边框） ──
@@ -352,9 +386,61 @@
     // ── 阶段G · 插件 iframe 装配（web 插件自动进侧栏） ──
     let KERNEL_BASE = ""; let OCT_CONN = { port: null, token: "" };
     const mounted = new Set();
+    // paintDot 按内核真实 State + Disabled 标志给侧栏按钮着色（当前页的红由 switchPanel 的 active 类负责，这里不参与）。
+    function paintDot(btn, state, disabled) {
+      btn.classList.toggle("running", state === "RUNNING" || state === "RUNNING_EXT");
+      btn.classList.toggle("starting", state === "STARTING");
+      btn.classList.toggle("disabled", !!disabled);
+    }
+    // 点击懒启动后的兜底：若插件状态事件存在转发延迟/丢失，轮询 plugin.list 用内核真实状态收敛圆点。
+    function pollState(btn, pid, tries) {
+      const n = tries || 0;
+      if (!btn.isConnected || n >= 8) { if (btn.isConnected) paintDot(btn, "REGISTERED"); return; }
+      rpc("plugin.list", {}).then(r => {
+        const p = (r.plugins || []).find(x => x.pluginId === pid);
+        const s = p && p.state;
+        if (s === "RUNNING" || s === "RUNNING_EXT") { paintDot(btn, s); return; }
+        setTimeout(() => pollState(btn, pid, n + 1), 600);
+      }).catch(() => setTimeout(() => pollState(btn, pid, n + 1), 600));
+    }
+    // ── 侧栏排序 + 默认页（存于 localStorage，属界面排布） ──
+    function loadAppPrefs() {
+      try { return JSON.parse(localStorage.getItem("oct.appPrefs") || "{}") || {}; }
+      catch { return {}; }
+    }
+    function saveAppPrefs(p) { localStorage.setItem("oct.appPrefs", JSON.stringify(p)); }
+    function defaultPageId() { return (loadAppPrefs().defaultPage || "home"); }
+    // 已知顺序区优先（home 始终在首个未命名的可指定位置也算靠前），未命名的按原序追加。
+    function orderedPlugins(plugins) {
+      const order = loadAppPrefs().pluginOrder || [];
+      const rank = {};
+      order.forEach((id, i) => rank[id] = i);
+      let next = order.length, homeRank = Infinity;
+      const r = p => (p.pluginId in rank) ? rank[p.pluginId]
+                    : (p.pluginId === "home" ? (homeRank === Infinity ? (homeRank = order.length - 0.5) : homeRank) : next++);
+      return [...plugins].sort((a, b) => r(a) - r(b));
+    }
+    // 启动后打开默认插件页（未运行则先拉起进程，逻辑同侧栏点击）。
+    function openDefaultPlugin() {
+      const pid = defaultPageId();
+      const btn = document.querySelector('button[data-plugin-id="' + pid + '"]');
+      if (btn) {
+        if (!btn.classList.contains("disabled") && !btn.classList.contains("running")) {
+          paintDot(btn, "STARTING");
+          rpc("plugin.start", { pluginId: pid }).then(() => {}).catch(() => {});
+          pollState(btn, pid, 0);
+        }
+        switchPanel("plugin." + pid);
+        return true;
+      }
+      return false;
+    }
+    // ── 侧栏排序 + 默认页 ──
     function renderPlugins(plugins) {
       const nav = document.querySelector("nav.side");
       const border = document.getElementById("pluginArea");
+      // 侧栏顺序以用户设置为主（localStorage 的 pluginOrder）；未配置时 home 置首、其余维持原序。
+      plugins = orderedPlugins(plugins);
       // 清空上一次动态区（保留 设置/调试 的“工作区”与新组）
       $$(".plugin-nav").forEach(n => n.remove());
       $$(".plugin-panel").forEach(p => p.remove());
@@ -366,45 +452,98 @@
         const anchor = document.querySelector("nav.side button[data-panel]");
         nav.insertBefore(sep, anchor.nextSibling ? anchor.nextSibling : null);
         web.forEach((p, i) => {
+          const pid = p.pluginId;
           const btn = document.createElement("button");
-          btn.className = "side-btn plugin-nav"; btn.dataset.panel = "plugin." + p.pluginId;
-          btn.innerHTML = `<span class="dot"></span>${(p.name || p.pluginId).slice(0, 6)}`;
-          btn.onclick = () => switchPanel("plugin." + p.pluginId);
+          btn.className = "side-btn plugin-nav"; btn.dataset.panel = "plugin." + pid;
+          // 圆点仅由内核真实 State 驱动：RUNNING→黑；disabled→灰+划线(已停)；其余(REGISTERED/IDLE/STOPPED)→灰。
+          btn.dataset.pluginId = pid;
+          paintDot(btn, p.state, p.disabled);
+          btn.innerHTML = `<span class="dot"></span><span class="name">${(p.name || pid).slice(0, 6)}</span>`;
+          btn.onclick = () => {
+            // 点开即显式启动进程（若未运行）：color 进 STARTING，内核 plugin.start 拉起后经事件/轮询收敛为黑。
+            if (!btn.classList.contains("disabled") && !btn.classList.contains("running")) {
+              paintDot(btn, "STARTING");
+              rpc("plugin.start", { pluginId: pid }).then(() => {}).catch(() => {});
+              pollState(btn, pid, 0); // 兜底：事件延迟/丢失时也用内核真实状态收敛
+            }
+            switchPanel("plugin." + pid);
+          };
           nav.insertBefore(btn, sep.nextSibling);
           // 面板
           const sec = document.createElement("section");
-          sec.className = "panel plugin-panel"; sec.id = "panel-plugin." + p.pluginId;
+          sec.className = "panel plugin-panel"; sec.id = "panel-plugin." + pid;
           const frame = document.createElement("iframe");
-          frame.dataset.plugin = p.pluginId;
-          frame.src = KERNEL_BASE + "plugin/" + p.pluginId + "/" + (p.ui.entry || "ui/index.html");
+          frame.dataset.plugin = pid;
+          // iframe 一律立即加载静态 UI（HTML/JS 是静态资源，无需进程运行；避免 data-src 懒加载导致的空白）。
+          // 进程是否启动不再由“加载 UI”隐式触发（内核 servePluginUI 已去掉 GetOrStart），改由点击侧栏时显式 plugin.start。
+          frame.src = KERNEL_BASE + "plugin/" + pid + "/" + (p.ui.entry || "ui/index.html");
           frame.setAttribute("style", "width:100%;height:100%;border:none;border-radius:14px;background:transparent;display:block;");
           sec.appendChild(frame);
-          border.appendChild(sec);
-          frame.addEventListener("load", () => mount(frame));
+          frame.addEventListener("load", () => mount(frame, sec)); // 仅握手，不改色（颜色只信内核 State）
+          frame.addEventListener("error", () => {
+            const ph = document.createElement("div");
+            ph.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#b23a30;font-size:13px;background:#f3ecdd;";
+            ph.textContent = `加载失败并无法诊断（iframe error）：${frame.src}`;
+            sec.appendChild(ph);
+          });
+          border.appendChild(sec); // 关键：把插件面板挂进 #pluginArea（此前丢失导致主区空白）
         });
       }
     }
     // iframe 加载完成后，把内核连接信息 postMessage 给插件页，插件页据此直连内核 WS。
     // 插件面板填满由 CSS(.panel.plugin-panel.active 绝对定位)负责，这里只做握手。
-    function mount(frame) {
+    function mount(frame, sec) {
       if (!frame.contentWindow) return;
       const id = frame.dataset.plugin;
       try {
         if (mounted.has(id)) return; mounted.add(id);
         frame.contentWindow.postMessage({ type: "oct.hello", port: OCT_CONN.port, token: OCT_CONN.token, pluginId: id }, "*");
+        // 加载后探测 iframe 内是否真有内容（区分“空白”是 iframe 空还是页面空）。
+        setTimeout(() => {
+          try {
+            const doc = frame.contentDocument;
+            if (!doc || !doc.body) return;
+            const len = (doc.body.innerHTML || "").length;
+            if (len < 10) {
+              const ph = document.createElement("div");
+              ph.style.cssText = "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#a8875a;font-size:13px;background:#f3ecdd;z-index:5;";
+              ph.textContent = `页面加载了但内容为空（body长度=${len}），src=${frame.src}`;
+              sec.appendChild(ph);
+            }
+          } catch (e) { /* 跨域不可读，忽略 */ }
+        }, 1200);
       } catch (e) { console.error("[plugin] 握手失败", id, e); }
     }
     // 插件 iframe 请求“以独立窗口打开页面”（如 md 编辑器）：组装内核地址并交主进程开窗。
     // 子页 app.js 读取查询参数 auth/kport 自连内核。仅接受本内核 origin 的消息。
     window.addEventListener("message", (ev) => {
       const d = ev.data || {};
-      if (d.type !== "oct.openPluginWindow") return;
-      if (!d.path) return;
-      if (ev.origin && KERNEL_BASE && !("" + ev.origin).includes("127.0.0.1")) return;
-      const url = KERNEL_BASE + String(d.path || "").replace(/^\//, "");
-      ipcRenderer.invoke("win:openPluginWindow", {
-        url, title: d.title, width: d.width, height: d.height,
-      });
+      if (d.type === "oct.openPluginWindow") {
+        if (!d.path) return;
+        if (ev.origin && KERNEL_BASE && !("" + ev.origin).includes("127.0.0.1")) return;
+        const url = KERNEL_BASE + String(d.path || "").replace(/^\//, "");
+        ipcRenderer.invoke("win:openPluginWindow", {
+          url, title: d.title, width: d.width, height: d.height,
+        });
+        return;
+      }
+      // 插件请求原生文件/目录对话框：action = 'openFile'|'pickDir'，带 reqId 回调
+      if (d.type === "oct.dialog" && d.action) {
+        if (ev.origin && KERNEL_BASE && !("" + ev.origin).includes("127.0.0.1")) return;
+        (async () => {
+          let r = { path: "", canceled: true };
+          try {
+            if (d.action === "pickFile") {
+              r = await ipcRenderer.invoke("dialog:pickFile", d.filters || []);
+            } else {
+              r = await ipcRenderer.invoke("dialog:pickDir");
+            }
+          } catch (e) { r = { path: "", canceled: true, error: String(e) }; }
+          try { ev.source.postMessage({ type: "oct:dialog:result", reqId: d.reqId, result: r }, "*"); }
+          catch (e) { /* source 不可达则忽略 */ }
+        })();
+        return;
+      }
     });
 
     // ── 阶段1 · 「添加插件」管理面板 ──
@@ -650,10 +789,19 @@
       } catch (e) { $("mgmtLog").textContent = "导入失败：" + e.message; }
     };
 
+    function ensurePluginFrame(pid) {
+      if (!pid || pid.startsWith("settings") || pid === "debug" || pid === "add") return;
+      const frame = document.querySelector(`iframe[data-plugin="${pid}"]`);
+      if (frame && !frame.getAttribute("src")) {
+        const u = frame.dataset.src;
+        if (u) frame.src = u; // 首次切到该插件时才加载，避免启动时把所有 lazy 插件全拉起
+      }
+    }
     // 左侧标签切换（统一入口，仅切换 .active 显示即可）
     function showPanel(name) {
       $$(".side-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
       $$(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
+      if (name.startsWith("plugin.")) ensurePluginFrame(name.slice("plugin.".length));
     }
     $$(".side-btn").forEach(btn => btn.onclick = () => showPanel(btn.dataset.panel));
 
@@ -677,6 +825,8 @@
       refreshMgmt();
       wirePluginPicker(); // 搜索+下拉选择交互（只挂一次，loadPerPluginList 只重建选项）
       loadPerPluginList();
+      openDefaultPlugin(); // 启动后默认打开用户在设置中指定的插件页（默认 home）
+      refreshOrderSettings(); // 填充「插件排序 · 默认页」配置卡片
     });
 
     async function loadDepCfg() {
@@ -692,6 +842,72 @@
         await rpc("deps.setConfig", { index_urls: indexUrls, cache_dir: $("cfgCache").value.trim() });
         $("cfgResult").textContent = "已保存，下次安装依赖生效。" + (indexUrls.length ? `（${indexUrls[0]}）` : "（用官方源）");
       } catch (e) { $("cfgResult").textContent = "保存失败：" + e.message; }
+    };
+
+    // ── 插件排序 · 默认页 设置 ──
+    function defaultOrder(plugins) {
+      const ids = plugins.map(p => p.pluginId);
+      return ["home", ...ids.filter(i => i !== "home")];
+    }
+    let orderSelIndex = -1;
+    function rebuildOrderList(order, plugins) {
+      const byId = {}; (plugins || []).forEach(p => byId[p.pluginId] = p);
+      const ul = $("orderList"); ul.innerHTML = "";
+      (order || []).forEach((id, i) => {
+        const li = document.createElement("li");
+        li.dataset.id = id; li.style.cssText = "padding:6px 10px;cursor:pointer;border-radius:6px;";
+        li.textContent = `${i + 1}. ${(byId[id] && byId[id].name) || id}`;
+        li.onclick = () => { ul.querySelectorAll("li").forEach(x => x.classList.remove("active")); li.classList.add("active"); orderSelIndex = i; };
+        ul.appendChild(li);
+      });
+      orderSelIndex = -1;
+    }
+    async function refreshOrderSettings() {
+      let plugins = []; try { plugins = (await rpc("plugin.list", {})).plugins || []; } catch {}
+      const prefs = loadAppPrefs();
+      const order = (prefs.pluginOrder && prefs.pluginOrder.length) ? prefs.pluginOrder : defaultOrder(plugins);
+      const sel = $("defPageSel"); sel.innerHTML = "";
+      plugins.forEach(p => {
+        const o = document.createElement("option"); o.value = p.pluginId;
+        o.textContent = (p.name || p.pluginId) + " (" + p.pluginId + ")"; sel.appendChild(o);
+      });
+      if (sel.querySelector('option[value="' + defaultPageId() + '"]')) sel.value = defaultPageId();
+      else sel.value = "home";
+      rebuildOrderList(order, plugins);
+      $("orderResult").textContent = "侧栏当前顺序：" + (order.join(" → ") || "空");
+    }
+    function applySidebarOrder() {
+      const sep = document.querySelector("nav.side .nav-title.plugin-nav");
+      if (!sep) return;
+      const sideroot = document.querySelector("nav.side");
+      const btns = [...$$("button.side-btn.plugin-nav")];
+      const order = loadAppPrefs().pluginOrder || [];
+      const rank = {}; order.forEach((id, i) => rank[id] = i); let next = order.length;
+      const r = b => (b.dataset.pluginId in rank) ? rank[b.dataset.pluginId] : next++;
+      btns.sort((a, b) => r(a) - r(b));
+      let anchor = sep;
+      btns.forEach(b => { sideroot.insertBefore(b, anchor.nextSibling); anchor = b; });
+    }
+    function moveOrder(delta) {
+      const li = $("orderList").querySelector("li.active");
+      if (!li) return;
+      const tgt = delta < 0 ? li.previousElementSibling : li.nextElementSibling;
+      if (!tgt) return;
+      $("orderList").insertBefore(delta < 0 ? li : tgt, delta < 0 ? tgt : li);
+      const order = [...$("orderList").querySelectorAll("li")].map(l => l.dataset.id);
+      rebuildOrderList(order, null); refreshOrderResult(order);
+    }
+    $("btnOrderUp").onclick = () => moveOrder(-1);
+    $("btnOrderDown").onclick = () => moveOrder(1);
+    async function refreshOrderResult(order) { $("orderResult").textContent = "侧栏当前顺序：" + (order.join(" → ") || "空"); }
+    $("btnOrderReset").onclick = async () => {
+      saveAppPrefs({ ...loadAppPrefs(), pluginOrder: undefined });
+      refreshOrderSettings(); applySidebarOrder(); $("orderResult").textContent = "已恢复默认：home 置首，其余按原序。";
+    };
+    $("btnOrderSave").onclick = async () => {
+      const order = [...$("orderList").querySelectorAll("li")].map(l => l.dataset.id);
+      saveAppPrefs({ defaultPage: $("defPageSel").value || "home", pluginOrder: order });
+      applySidebarOrder(); $("orderResult").textContent = "已保存并应用。下次启动默认打开：" + ($("defPageSel").value || "home");
     };
 
     function renderPerms(d) {
@@ -726,22 +942,48 @@
       }
     }
 
+    function depPluginsReady() {
+      const input = $("depPick"), dl = $("depPlugins");
+      if (!input) return false;
+      if (!$("depPlugins").innerHTML) {
+        const all = LC_INDEX.__all || [];
+        dl.innerHTML = all.map(p => `<option value="${p.name || p.pluginId}（${p.pluginId}）"></option>`).join("");
+      }
+      return true;
+    }
+    $("btnDepRefresh").onclick = async () => {
+      $("depPlugins").innerHTML = "";
+      try { const l = (await rpc("plugin.list", {})).plugins || []; LC_INDEX.__all = l; } catch (e) {}
+      depPluginsReady();
+    };
+    // 当前选中的依赖插件：支持「名称（id）」「id」「部分名称/id 前缀」
+    function depPluginId() {
+      const v = $("depPick").value.trim();
+      const hit = resolveLC(v);
+      return (hit && hit.pluginId) || v;
+    }
     $("btnDeps").onclick = async () => {
+      depPluginsReady();
+      const pid = depPluginId();
+      if (!pid) { $("depResult").textContent = "请先在“插件依赖”处选择或输入一个插件。"; return; }
       try {
-        const r = await rpc("deps.preview", { pluginId: "demo_hello" });
+        const r = await rpc("deps.preview", { pluginId: pid });
         $("depArea").textContent = r.satisfied
-          ? "已就绪（隔离环境存在）"
-          : "待安装：" + JSON.stringify(r.dependencies, null, 2);
-        $("depResult").textContent = "饱和度：" + r.satisfied;
+          ? (pid + " · 依赖已就绪（隔离环境存在）")
+          : ("待安装依赖：\n" + JSON.stringify(r.dependencies, null, 2));
+        $("depResult").textContent = pid + " · 就绪：" + r.satisfied;
       } catch (e) { $("depResult").textContent = "预览失败：" + e.message; }
     };
 
     $("btnInstall").onclick = async () => {
-      $("depResult").textContent = "安装中…";
+      depPluginsReady();
+      const pid = depPluginId();
+      if (!pid) { $("depResult").textContent = "请先在“插件依赖”处选择或输入一个插件。"; return; }
+      $("depResult").textContent = "安装中…（" + pid + " · 首次/重装需数分钟，请耐心等待）";
       try {
-        const r = await rpc("deps.install", { pluginId: "demo_hello" });
+        const r = await rpc("deps.install", { pluginId: pid, force: true }, 600000);
         $("depResult").textContent = "已安装 → " + r.venvPython;
-        await rpc("plugin.restart", { pluginId: "demo_hello" });
+        await rpc("plugin.restart", { pluginId: pid });
         $("depResult").textContent += "\n插件已重启，切换为隔离解释器。";
       } catch (e) { $("depResult").textContent = "安装失败：" + e.message; }
     };
@@ -753,6 +995,39 @@
         $("permResult").textContent = "读文件结果：" + JSON.stringify(r, null, 2);
       } catch (e) { $("permResult").textContent = "读文件被拒绝：" + e.message; }
     };
+
+    $("btnEnvsClear").onclick = () => $("envsResult").textContent = "已清空。";
+
+    $("btnEnvs").onclick = async () => {
+      const pre = $("envsResult");
+      pre.textContent = "读取中…（需内核已重建并重启）";
+      try {
+        const r = await rpc("deps.envs", {});
+        pre.textContent = renderEnvs(r);
+      } catch (e) { pre.textContent = "读取失败：" + e.message; }
+    };
+
+    function renderEnvs(r) {
+      const lines = [];
+      const section = t => lines.push("──── " + t + " ────");
+      const pkg = p => lines.push("  " + p.name + "   " + p.version);
+      if (r.managed) {
+        section("项目 Python（托管 3.12）");
+        if (r.managed.error) lines.push("  错误: " + r.managed.error);
+        (r.managed.packages || []).forEach(pkg);
+      }
+      (r.plugins || []).forEach(pl => {
+        section("插件 " + pl.name + "（" + pl.pluginId + "）");
+        if (pl.error) lines.push("  错误: " + pl.error);
+        (pl.packages || []).forEach(pkg);
+      });
+      if (r.node) {
+        section("Electron 宿主（host）");
+        if (r.node.error) lines.push("  错误: " + r.node.error);
+        (r.node.packages || []).forEach(pkg);
+      }
+      return lines.join("\n") || "（无）";
+    }
 
     // 共享函数卡（阶段C）
     async function refreshFns() {
@@ -785,6 +1060,11 @@
       if (t.method !== "event") { console.log("event:", raw); return; }
       const p = t.params || {};
       console.log(`[event] ${p.source}:${p.type}`, p.data);
+      // 内核进程状态事件：仅刷新圆点（颜色只信内核 State，不做乐观猜测）。
+      if (p.source === "kernel" && p.type === "plugin.state" && p.data && p.data.id) {
+        const b = document.querySelector(`nav.side .side-btn[data-plugin-id="${CSS.escape ? CSS.escape(p.data.id) : p.data.id}"]`);
+        if (b) paintDot(b, p.data.state, b.classList.contains("disabled"));
+      }
       if (++evCount > 200) { $("evLog").textContent = ""; evCount = 0; }
       const pretty = JSON.stringify(p.data) ?? "";
       $("evLog").textContent = `${new Date().toLocaleTimeString()} · ${p.source} · ${p.type} ${pretty}\n` + $("evLog").textContent;

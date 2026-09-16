@@ -76,8 +76,10 @@ type Manager struct {
 	pythonPath string
 	gate       *perms.Gate
 	venvPython func(Manifest) string
+	depsReady  func(Manifest) bool // Python 依赖就绪判定（RequirementsSatisfied）；nil 时默认就绪
 	nodeBin    func(Manifest) (string, bool)
-	onSpawn    func(*Plugin) // 注入 Event 广播出口（内核装配）
+	onSpawn    func(*Plugin)          // 注入 Event 广播出口（内核装配）
+	onState    func(id, state string) // 进程状态变更回调（内核装配→宿主刷新 UI）
 
 	fnsMu sync.Mutex
 	fns   map[string]Fn
@@ -99,6 +101,14 @@ func (m *Manager) SetVenvResolver(fn func(Manifest) string) {
 	m.mu.Unlock()
 }
 
+// SetDepsReadyResolver 注入 Python 依赖就绪判定（deps.Installer.RequirementsSatisfied）。
+// 未注入视为无条件就绪（等价于旧行为）。
+func (m *Manager) SetDepsReadyResolver(fn func(Manifest) bool) {
+	m.mu.Lock()
+	m.depsReady = fn
+	m.mu.Unlock()
+}
+
 // SetNodeResolver 设置 Node 插件解释器解析器。
 func (m *Manager) SetNodeResolver(fn func(Manifest) (string, bool)) {
 	m.mu.Lock()
@@ -111,6 +121,23 @@ func (m *Manager) SetOnSpawn(fn func(*Plugin)) {
 	m.mu.Lock()
 	m.onSpawn = fn
 	m.mu.Unlock()
+}
+
+// SetOnState 注入进程状态变更回调（内核装配→宿主实时刷新侧栏圆点）。
+func (m *Manager) SetOnState(fn func(id, state string)) {
+	m.mu.Lock()
+	m.onState = fn
+	m.mu.Unlock()
+}
+
+// emitState 触发状态变更回调（异步，避免持有锁时回调卡住启动路径）。
+func (m *Manager) emitState(r *reg, state string) {
+	m.mu.Lock()
+	fn := m.onState
+	m.mu.Unlock()
+	if fn != nil {
+		go fn(r.id, state)
+	}
 }
 
 func (m *Manager) applySpawnWire(p *Plugin) {
@@ -152,6 +179,7 @@ func isNodeType(t string) bool {
 }
 
 // pluginReady 判断插件是否可启动（依赖是否就绪）。
+// Node：需 node 解释器可用；Python：需已注入的就绪判定通过（默认通过，等价旧行为）。
 func (m *Manager) pluginReady(mf Manifest) bool {
 	if isNodeType(mf.Type) {
 		m.mu.Lock()
@@ -163,8 +191,15 @@ func (m *Manager) pluginReady(mf Manifest) bool {
 		if _, ok := nodeBin(mf); !ok {
 			return false
 		}
+		return true
 	}
-	return true
+	m.mu.Lock()
+	dr := m.depsReady
+	m.mu.Unlock()
+	if dr == nil {
+		return true
+	}
+	return dr(mf)
 }
 
 // Discover 扫描 plugins/<id>/manifest.json，返回清单（不含实例）。
@@ -290,9 +325,8 @@ func (m *Manager) register(mf Manifest) *reg {
 		disabled: mf.LoadMode == LoadModeDisabled,
 		startCh:  make(chan struct{}),
 	}
-	if !m.pluginReady(mf) {
-		local.depsPending = true
-	}
+	// 注意：登记阶段不探测依赖（pluginReady 可能同步 import，慢），只做快速扫描，
+	// 保证 plugin.list / 侧栏「注册表预显示」立即可用。依赖就绪在真正启动时判定（startAlways / GetOrStart）。
 	m.mu.Lock()
 	if old, ok := m.regs[mf.ID]; ok {
 		m.mu.Unlock()
@@ -309,18 +343,9 @@ func (m *Manager) getReg(id string) *reg {
 	return m.regs[id]
 }
 
-// StartAll 定位托管 Python，并按 load_mode 分级启动：
-// always → 立即启动；prewarm/lazy → 仅登记（按需 GetOrStart 拉起）；disabled → 跳过。
-func (m *Manager) StartAll() {
-	py, err := LocatePython("3.12")
-	if err != nil {
-		log.Printf("[kernel] %v", err)
-		return
-	}
-	m.mu.Lock()
-	m.pythonPath = py
-	m.mu.Unlock()
-
+// RegisterAll 扫描并快速登记全部插件（不探测依赖），供 plugin.list / 侧栏预显示。
+// 在打印 auth 前同步调用，保证宿主首屏即拿到完整插件清单。
+func (m *Manager) RegisterAll() {
 	manifests, err := m.Discover()
 	if err != nil {
 		log.Printf("[kernel] discover: %v", err)
@@ -329,13 +354,41 @@ func (m *Manager) StartAll() {
 	for _, mf := range manifests {
 		m.register(mf)
 	}
-	// always 常驻：立即启动
+}
+
+// StartAll 启动常驻（load_mode=always）插件。每个插件在独立 goroutine 中
+// 先做依赖就绪判定（带超时）再启动——一个插件依赖卡住只影响它自己，
+// 不会阻塞其它插件或整体启动。
+func (m *Manager) StartAll() {
+	if py, err := LocatePython("3.12"); err != nil {
+		log.Printf("[kernel] %v", err)
+	} else {
+		m.mu.Lock()
+		m.pythonPath = py
+		m.mu.Unlock()
+	}
 	for _, r := range m.snapshotRegs() {
-		if !r.disabled && !r.depsPending && r.mf.LoadMode == LoadModeAlways {
-			if _, err := m.startNow(r); err != nil {
-				log.Printf("[kernel] start always %s: %v", r.id, err)
-			}
+		if r.disabled || r.mf.LoadMode != LoadModeAlways {
+			continue
 		}
+		r := r
+		go m.startAlways(r)
+	}
+}
+
+// startAlways 启动单个常驻插件：先判定依赖就绪（导入探测，超时内完成），
+// 未就绪则标记 depsPending 并保持停置，仅影响该插件自身。
+func (m *Manager) startAlways(r *reg) {
+	ready := m.pluginReady(r.mf)
+	r.mu.Lock()
+	r.depsPending = !ready
+	r.mu.Unlock()
+	if !ready {
+		log.Printf("[kernel] plugin %s deps not ready; held", r.id)
+		return
+	}
+	if _, err := m.startNow(r); err != nil {
+		log.Printf("[kernel] start always %s: %v", r.id, err)
 	}
 }
 
@@ -443,6 +496,7 @@ func (m *Manager) SetLifecycle(id string, ov Override) error {
 			r.state = RegStopped
 			r.running = nil
 			r.mu.Unlock()
+			m.emitState(r, "STOPPED")
 			return nil
 		}
 		_ = m.Restart(id)
@@ -458,6 +512,13 @@ func (m *Manager) GetOrStart(id string) (*Plugin, error) {
 	}
 	if err := m.beginIfNeeded(r); err != nil {
 		return nil, err
+	}
+	// 登记阶段未探测依赖，这里按需判定（带超时），保持 lazy/prewarm 的就绪门槛不变。
+	if !m.pluginReady(r.mf) {
+		r.mu.Lock()
+		r.depsPending = true
+		r.mu.Unlock()
+		return nil, fmt.Errorf("plugin %s dependencies not installed", r.id)
 	}
 	return m.startNow(r)
 }
@@ -504,6 +565,7 @@ func (m *Manager) startNow(r *reg) (*Plugin, error) {
 		sig := make(chan struct{})
 		r.startCh = sig // 本次尝试的信号，供并发调用方等待
 		r.mu.Unlock()
+		m.emitState(r, RegStarting.String())
 		return m.spawn(r, sig)
 	}
 }
@@ -517,6 +579,7 @@ func (m *Manager) spawn(r *reg, sig chan struct{}) (*Plugin, error) {
 		r.mu.Lock()
 		r.state = RegStopped
 		r.mu.Unlock()
+		m.emitState(r, "STOPPED")
 		close(sig)
 		return nil, err
 	}
@@ -527,6 +590,7 @@ func (m *Manager) spawn(r *reg, sig chan struct{}) (*Plugin, error) {
 	r.running = p
 	r.state = RegRunning
 	r.mu.Unlock()
+	m.emitState(r, "RUNNING")
 	close(sig)
 
 	m.applySpawnWire(p)
@@ -599,6 +663,7 @@ func (m *Manager) recycle(r *reg, p *Plugin) {
 	r.state = RegIdle
 	r.running = nil
 	r.mu.Unlock()
+	m.emitState(r, "IDLE")
 	log.Printf("[kernel] plugin %s idle; recycling", r.id)
 
 	grace := r.mf.Recycle.GracefulShutdownMs
@@ -629,6 +694,7 @@ func (m *Manager) onProcessExit(r *reg, p *Plugin, code int) {
 	r.running = nil
 	delay, allow := m.nextBackoffLocked(r, code)
 	r.mu.Unlock()
+	m.emitState(r, "STOPPED")
 
 	if !allow {
 		log.Printf("[kernel] plugin %s paused (exit code %d): auto-restart exhausted/disabled", r.id, code)
@@ -732,6 +798,12 @@ func (m *Manager) Restart(id string) error {
 	r.running = nil
 	r.mu.Unlock()
 	_, err := m.startNow(r)
+	if err == nil {
+		// 依赖安装/修复后重启成功：解除 depsPending，恢复 GetOrStart/按需启动。
+		r.mu.Lock()
+		r.depsPending = false
+		r.mu.Unlock()
+	}
 	return err
 }
 

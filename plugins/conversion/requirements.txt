@@ -1,0 +1,24 @@
+# conversion —— 文档格式转换后端依赖
+# 按其上层引擎（core/engines）顶层实际导入的第三方库声明；轻量 ML 库、外部
+# 二进制（pandoc/ffmpeg/LibreOffice）依赖均已在引擎内做延迟导入/优雅降级，
+# 缺失时不影响插件启动。
+markdown==3.7
+beautifulsoup4==4.12.3
+html2text==2024.2.26
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+Pillow==11.0.0
+img2pdf==0.5.1
+reportlab==4.2.2
+pypdf==5.1.0
+pdfplumber==0.11.4
+pypandoc==1.14
+# TTS（文本转语音，Kokoro/edge）在运行期才导入，避免抬高举包启动链
+numpy==2.2.1
+soundfile==0.13.1
+# Kokoro 语音引擎（TTS）+ 中文 g2p（运行期才导入）
+kokoro==0.9.4
+misaki[zh]==0.9.4
+onnxruntime==1.21.1
+edge_tts==7.2.8

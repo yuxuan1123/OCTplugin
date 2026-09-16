@@ -2,6 +2,7 @@ package ipc
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -65,6 +66,11 @@ func (s *Server) WireEvents() {
 // EventSink 返回一个插件→内核→宿主的广播闭包，供懒启动/重启的新插件实例注入 Event。
 func (s *Server) EventSink() func(src, typ string, data any) {
 	return func(src, typ string, data any) { s.broadcast(src, typ, data) }
+}
+
+// NotifyState 由内核 Manager 的状态变更回调注入，把插件进程启停推给宿主（source=kernel, type=plugin.state）。
+func (s *Server) NotifyState(id, state string) {
+	s.broadcast("kernel", "plugin.state", map[string]any{"id": id, "state": state})
 }
 
 // broadcast 把插件事件以 ws 通知（无 id）推给宿主（FR-8 事件通道）。
@@ -181,6 +187,8 @@ func (s *Server) dispatch(conn *websocket.Conn, req protocol.Request) {
 		s.reply(conn, protocol.NewResult(req.ID, map[string]any{}))
 	case "plugin.list":
 		s.handleList(conn, req)
+	case "plugin.start":
+		s.handlePluginStart(conn, req)
 	case "plugin.call":
 		s.handleCall(conn, req)
 	case "plugin.details":
@@ -205,6 +213,8 @@ func (s *Server) dispatch(conn *websocket.Conn, req protocol.Request) {
 		s.handleDepsGetConfig(conn, req)
 	case "deps.setConfig":
 		s.handleDepsSetConfig(conn, req)
+	case "deps.envs":
+		s.handleDepsEnvs(conn, req)
 	case "registry.list":
 		s.handleRegistryList(conn, req)
 	case "registry.call":
@@ -358,6 +368,19 @@ func (s *Server) handlePluginRestart(conn *websocket.Conn, req protocol.Request)
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{"pluginId": p.PluginID, "restarted": true}))
 }
 
+// plugin.start 显式拉起插件进程（懒启动入口：前端点开未运行插件时调用，避免“加载 UI”隐式启动）。
+func (s *Server) handlePluginStart(conn *websocket.Conn, req protocol.Request) {
+	var p struct {
+		PluginID string `json:"pluginId"`
+	}
+	_ = json.Unmarshal(req.Params, &p)
+	if _, err := s.smanager.GetOrStart(p.PluginID); err != nil {
+		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginDown, map[string]any{"error": err.Error()}))
+		return
+	}
+	s.reply(conn, protocol.NewResult(req.ID, map[string]any{"pluginId": p.PluginID, "started": true}))
+}
+
 // plugin.import 从源目录导入 OCTplugin 格式插件（复制进 plugins/<id> 并启动）。
 func (s *Server) handlePluginImport(conn *websocket.Conn, req protocol.Request) {
 	var p struct {
@@ -404,8 +427,8 @@ func (s *Server) handleDepsPreview(conn *websocket.Conn, req protocol.Request) {
 	}
 	mf := pl.Manifest
 	rows := s.installer.Preview(mf)
-	// 是否已就绪（Python 看 venv，Node 看插件目录 node_modules）
-	satisfied := s.installer.VenvPython(mf) != "" || s.installer.NodeModulesReady(mf)
+	// 是否已就绪（Python 做顶层包导入探测，Node 看插件目录 node_modules）
+	satisfied := s.installer.Ready(mf)
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{
 		"pluginId": p.PluginID, "dependencies": rows, "satisfied": satisfied,
 	}))
@@ -415,6 +438,7 @@ func (s *Server) handleDepsPreview(conn *websocket.Conn, req protocol.Request) {
 func (s *Server) handleDepsInstall(conn *websocket.Conn, req protocol.Request) {
 	var p struct {
 		PluginID string `json:"pluginId"`
+		Force    bool   `json:"force"`
 	}
 	_ = json.Unmarshal(req.Params, &p)
 	pl := s.smanager.Plugin(p.PluginID)
@@ -422,11 +446,14 @@ func (s *Server) handleDepsInstall(conn *websocket.Conn, req protocol.Request) {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginMissing, map[string]any{"pluginId": p.PluginID}))
 		return
 	}
-	// 已就绪则幂等返回（Python 看 venv，Node 看插件目录里的 node_modules）。
-	satisfied := s.installer.VenvPython(pl.Manifest) != "" || s.installer.NodeModulesReady(pl.Manifest)
-	if satisfied {
+	// 已就绪则幂等返回（Python 做顶层包导入探测，Node 看插件目录里的 node_modules）。
+	// force=true 时跳过该短路，无论 venv 是否存在都按 manifest 依赖重新安装，
+	// 用于 requirements.txt 等新增依赖后触发的“重装生效”。
+	satisfied := s.installer.Ready(pl.Manifest)
+	if satisfied && !p.Force {
 		s.reply(conn, protocol.NewResult(req.ID, map[string]any{
-			"pluginId": p.PluginID, "installed": true, "satisfied": true,
+			"pluginId": p.PluginID, "installed": true, "restarted": false,
+			"satisfied": true, "venvPython": s.installer.VenvPython(pl.Manifest),
 		}))
 		return
 	}
@@ -444,6 +471,7 @@ func (s *Server) handleDepsInstall(conn *websocket.Conn, req protocol.Request) {
 	s.WireEvents()
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{
 		"pluginId": p.PluginID, "installed": true, "restarted": true,
+		"satisfied": true, "venvPython": s.installer.VenvPython(pl.Manifest),
 	}))
 }
 
@@ -487,6 +515,49 @@ func contains(ss []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// deps.envs 汇总已安装库及版本：项目托管 Python、各插件隔离 venv、Electron 宿主 Node 依赖。
+func (s *Server) handleDepsEnvs(conn *websocket.Conn, req protocol.Request) {
+	result := make(map[string]any)
+
+	// 1) 项目托管 Python（uv managed 3.12）
+	if mp, err := s.installer.ManagedPython(); err == nil {
+		entry := map[string]any{"python": mp}
+		if pkgs, e2 := s.installer.ListPackages(mp); e2 == nil {
+			entry["packages"] = pkgs
+		} else {
+			entry["error"] = e2.Error()
+		}
+		result["managed"] = entry
+	}
+
+	// 2) 各插件隔离 venv（node 插件无 venv 自然被跳过）
+	var plugins []map[string]any
+	for _, sum := range s.smanager.All() {
+		mf := sum.Manifest
+		vp := s.installer.VenvPython(mf)
+		if vp == "" {
+			continue
+		}
+		entry := map[string]any{"pluginId": mf.ID, "name": mf.Name, "python": vp, "packages": []deps.Pkg{}}
+		if pkgs, e := s.installer.ListPackages(vp); e == nil {
+			entry["packages"] = pkgs
+		} else {
+			entry["error"] = e.Error()
+		}
+		plugins = append(plugins, entry)
+	}
+	result["plugins"] = plugins
+
+	// 3) Electron 宿主顶层 Node 依赖
+	if pkgs, e := s.installer.NodePackages(); e == nil {
+		result["node"] = map[string]any{"packages": pkgs}
+	} else {
+		result["node"] = map[string]any{"error": e.Error()}
+	}
+
+	s.reply(conn, protocol.NewResult(req.ID, result))
 }
 
 func (s *Server) handleCall(conn *websocket.Conn, req protocol.Request) {
@@ -610,12 +681,22 @@ func (s *Server) servePluginUI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, rel := rest[:slash], rest[slash+1:]
-	pl := s.smanager.Plugin(id)
-	if pl == nil || pl.Manifest.UI.Type == "" {
+	// UI 是静态资源，不应要求插件进程已运行：lazy/prewarm 未启动时也需能 serve。
+	mf, ok := s.smanager.Describe(id)
+	if !ok || mf.UI.Type == "" {
 		http.NotFound(w, r)
 		return
 	}
 	pluginRoot := filepath.Join(s.pluginsDir, id)
+	// 说明：加载 UI 不隐式启动进程。启动改由宿主前端显式 plugin.start 触发（避免 iframe 预载所有插件时把 lazy 全拉起）。
+	lm := s.smanager.Lifecycle(id).Effective.LoadMode
+	// disabled 插件：不可被 HTTP 触发启动，也不 serve 正常可交互 UI，返回“已禁用”状态页。
+	if lm == supervisor.LoadModeDisabled {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, disabledPaneHTML, id)
+		return
+	}
 	target := filepath.Join(pluginRoot, filepath.FromSlash(filepath.Clean("/"+rel))) // 归一防穿越
 	if !strings.HasPrefix(target+sResourcesSep, pluginRoot+sResourcesSep) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -660,3 +741,14 @@ func (s *Server) reply(conn *websocket.Conn, resp protocol.Response) {
 		log.Printf("[ws] write: %v", err)
 	}
 }
+
+// disabledPaneHTML 返回给“已禁用”插件的占位页：不承载可交互 UI，明确告知用户服务已停。
+const disabledPaneHTML = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+font-family:system-ui,sans-serif;background:#f3ecdd;color:#7a7468;gap:10px}
+.b{font-size:30px}.t{font-size:15px;font-weight:600;color:#1e1b17}
+.s{font-size:12px;color:#8a8377;text-align:center;padding:0 30px}</style></head>
+<body><div class="b">i</div><div class="t">该插件服务已禁用</div>
+<div class="s">插件「%s」已设为 disabled，其进程不会启动，页面仅为占位。
+请在 设置 → 启动与资源 中重新启用。</div></body></html>`
