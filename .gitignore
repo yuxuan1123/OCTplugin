@@ -13,6 +13,14 @@ deps/
 store/
 logs/
 runtime/
+# 本地大体积运行时工具（如 LibreOffice ~1GB + 下载缓存），多插件共享，不进版本库
+tools/
+# 插件运行期缓存（预设/状态/临时产物）
+plugins/*/.cache/
+.cache/
+# 编辑器备份文件
+*~
+*.exe~
 
 # ---- Node ----
 node_modules/
