@@ -40,6 +40,33 @@ ipcMain.handle("win:openPluginWindow", async (e, opts) => {
   return { ok: true };
 });
 
+// 设置子窗口：在主窗口外以独立小窗打开“某一项设置表单”（parent:win 使关闭主窗时一并清理）。
+// 复用 win:openPluginWindow 的建窗思路；URL 追加 view=settings&sec=…&auth=&kport=（sub 的 index.html 走宿主 rpc 桥，auth/kport 仅为格式一致）
+ipcMain.handle("win:openSettings", async (e, { sec } = {}) => {
+  if (!kernelAuth) return { ok: false, error: "内核未就绪" };
+  const names = { A: "依赖源设置", B: "启动与资源·全局策略", C: "启动与资源·单插件策略", D: "插件排序·默认页" };
+  const name = names[sec] || sec || "设置";
+  const sub = new BrowserWindow({
+    width: 720, height: 640, title: "设置 · " + name, icon: APP_LOGO,
+    autoHideMenuBar: true, parent: win, // parent 绑定但仍是可拖出主窗外的独立窗口
+    // 与主窗一致开启 nodeIntegration：子窗加载的是同一个 index.html，其渲染脚本用 require("electron") +
+    // ipcRenderer.invoke("rpc") 经由宿主主进程复用内核连接（详见 index.html 注释）。
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  // 必须用 loadFile 的 options.query 传参：直接把 ?view=… 拼进 filePath 会被当磁盘文件名，进不了子窗口模式。
+  sub.loadFile("index.html", {
+    query: { view: "settings", sec: sec || "", auth: kernelAuth.token, kport: String(kernelAuth.port) },
+  });
+  return { ok: true };
+});
+
+// 关闭当前调用者所属窗口（设置子窗口的“关闭”按钮用；sender 即子窗自身）
+ipcMain.handle("win:closeSelf", (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w) w.close();
+  return { ok: true };
+});
+
 function showMain() {
   if (!win) return;
   win.show(); win.focus();

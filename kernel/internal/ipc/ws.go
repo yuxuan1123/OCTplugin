@@ -420,12 +420,12 @@ func (s *Server) handleDepsPreview(conn *websocket.Conn, req protocol.Request) {
 		PluginID string `json:"pluginId"`
 	}
 	_ = json.Unmarshal(req.Params, &p)
-	pl := s.smanager.Plugin(p.PluginID)
-	if pl == nil || s.installer == nil {
+	// 依赖安装作用于「已登记」插件即可，不必要求其正在运行（lazy/prewarm 插件常未启动）。
+	mf, ok := s.smanager.Describe(p.PluginID)
+	if !ok || s.installer == nil {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginMissing, map[string]any{"pluginId": p.PluginID}))
 		return
 	}
-	mf := pl.Manifest
 	rows := s.installer.Preview(mf)
 	// 是否已就绪（Python 做顶层包导入探测，Node 看插件目录 node_modules）
 	satisfied := s.installer.Ready(mf)
@@ -441,25 +441,26 @@ func (s *Server) handleDepsInstall(conn *websocket.Conn, req protocol.Request) {
 		Force    bool   `json:"force"`
 	}
 	_ = json.Unmarshal(req.Params, &p)
-	pl := s.smanager.Plugin(p.PluginID)
-	if pl == nil || s.installer == nil {
+	// 依赖安装作用于「已登记」插件即可，不必要求其正在运行（lazy/prewarm 插件常未启动）。
+	mf, ok := s.smanager.Describe(p.PluginID)
+	if !ok || s.installer == nil {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrPluginMissing, map[string]any{"pluginId": p.PluginID}))
 		return
 	}
 	// 已就绪则幂等返回（Python 做顶层包导入探测，Node 看插件目录里的 node_modules）。
 	// force=true 时跳过该短路，无论 venv 是否存在都按 manifest 依赖重新安装，
 	// 用于 requirements.txt 等新增依赖后触发的“重装生效”。
-	satisfied := s.installer.Ready(pl.Manifest)
+	satisfied := s.installer.Ready(mf)
 	if satisfied && !p.Force {
 		s.reply(conn, protocol.NewResult(req.ID, map[string]any{
 			"pluginId": p.PluginID, "installed": true, "restarted": false,
-			"satisfied": true, "venvPython": s.installer.VenvPython(pl.Manifest),
+			"satisfied": true, "venvPython": s.installer.VenvPython(mf),
 		}))
 		return
 	}
 	// 首次安装：先停掉持有该 venv/目录的插件进程，否则 Windows 无法删除依赖目录（Access denied）
 	_ = s.smanager.StopPlugin(p.PluginID)
-	if err := s.installer.Install(pl.Manifest); err != nil {
+	if err := s.installer.Install(mf); err != nil {
 		s.reply(conn, protocol.NewError(req.ID, protocol.ErrDepsInstall, map[string]any{"error": err.Error()}))
 		return
 	}
@@ -471,7 +472,7 @@ func (s *Server) handleDepsInstall(conn *websocket.Conn, req protocol.Request) {
 	s.WireEvents()
 	s.reply(conn, protocol.NewResult(req.ID, map[string]any{
 		"pluginId": p.PluginID, "installed": true, "restarted": true,
-		"satisfied": true, "venvPython": s.installer.VenvPython(pl.Manifest),
+		"satisfied": true, "venvPython": s.installer.VenvPython(mf),
 	}))
 }
 

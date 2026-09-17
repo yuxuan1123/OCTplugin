@@ -211,27 +211,20 @@ def md_to_txt(input_path, output_path, log):
 
 
 def md_to_images(input_path, output_path, log):
-    """MD → 图片（先转 HTML，再用浏览器截图；playwright 不可用时退回 reportlab 渲染）"""
+    """MD → 图片（走 MD→DOCX→PDF→图片 中转；中文清晰，不再依赖 playwright）"""
     if not file_exists(input_path, log): return False
     try:
         log(f"🔄 MD → 图片: {input_path}")
-        # 用 markdown 库渲染为 HTML
-        html_body = md_lib.markdown(read_text(input_path), extensions=["extra", "codehilite"])
-        styled = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-body{{font-family:Helvetica,Arial,sans-serif;max-width:800px;margin:20px auto;padding:20px;line-height:1.7;color:#222}}
-h1,h2,h3{{color:#1a1a1a}}code{{background:#f4f4f4;padding:2px 5px;border-radius:3px}}
-pre{{background:#f4f4f4;padding:12px;border-radius:5px;overflow:auto}}img{{max-width:100%}}
-</style></head><body>{html_body}</body></html>"""
-        tmp_html = output_path + ".tmp.html"
-        write_text(tmp_html, styled)
-        ok = _html_to_images_playwright(tmp_html, output_path, log)
-        if not ok:
-            log("⚠ Playwright 不可用，改用 reportlab 渲染单图")
-            html_to_pdf_via_reportlab(tmp_html, output_path.replace(".png", ".pdf"), log)
-        os.remove(tmp_html)
-        log(f"✅ 完成 → {output_path}")
-        return True
+        tmp_docx = output_path + ".tmp.docx"
+        if not md_to_docx(input_path, tmp_docx, log):
+            return False
+        try:
+            if output_path.lower().endswith((".jpg", ".jpeg")):
+                return docx_to_jpgs(tmp_docx, output_path, log)
+            return docx_to_images(tmp_docx, output_path, log)
+        finally:
+            if os.path.exists(tmp_docx):
+                os.remove(tmp_docx)
     except Exception as e:
         log(f"❌ {e}"); return False
 
@@ -255,23 +248,15 @@ def docx_to_md(input_path, output_path, log):
 
 
 def docx_to_pdf(input_path, output_path, log):
-    """DOCX → PDF（优先 docx2pdf/LibreOffice，均失败时退回 reportlab 重建）"""
+    """DOCX → PDF（优先 LibreOffice，失败时退回 reportlab 重建）"""
     if not file_exists(input_path, log): return False
     try:
         log(f"🔄 DOCX → PDF: {input_path}")
-        # 方法1: docx2pdf（Windows + MS Word）
-        try:
-            from docx2pdf import convert as d2p
-            d2p(input_path, output_path)
-            log(f"✅ 完成(docx2pdf) → {output_path}")
-            return True
-        except Exception as e1:
-            log(f"⚠ docx2pdf 失败({e1})，尝试 LibreOffice…")
-        # 方法2: LibreOffice headless
+        # 方式1（主）：LibreOffice headless（保留版式）
         if _libreoffice_convert(input_path, output_path, "pdf", log):
             return True
-        # 方法3: 用 reportlab 重建（丢格式但可保留文字）
-        log("⚠ 用 reportlab 重建 PDF（仅保留文本）")
+        # 方式2：用 reportlab 重建（丢格式但可保留文字）
+        log("⚠ LibreOffice 不可用，用 reportlab 重建 PDF（仅保留文本）")
         _docx_to_pdf_reportlab(input_path, output_path, log)
         log(f"✅ 完成(reportlab) → {output_path}")
         return True
@@ -566,18 +551,37 @@ def txt_to_pdf(input_path, output_path, log):
         log(f"❌ {e}"); return False
 
 
+def _pil_cjk_font(size):
+    """加载支持中文的字体（Windows 系统字体优先，避免中文乱码）。"""
+    from PIL import ImageFont
+    win_fonts = os.environ.get("WINDIR", r"C:\Windows") + r"\Fonts"
+    for name in ("msyh.ttc", "simsun.ttc", "simhei.ttf", "simkai.ttf",
+                 "Deng.ttf", "Dengxian.ttf"):
+        p = os.path.join(win_fonts, name)
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+    try:  # 非 Windows 兜底
+        return ImageFont.truetype("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", size)
+    except (OSError, IOError):
+        pass
+    try:
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+    except (OSError, IOError):
+        return ImageFont.load_default()
+
+
 def txt_to_images(input_path, output_path, log):
-    """TXT → 图片（PIL 渲染文本到 PNG）"""
+    """TXT → 图片（PIL 渲染文本到 PNG，使用中文友好字体）"""
     if not file_exists(input_path, log): return False
     try:
         log(f"🔄 TXT → 图片: {input_path}")
-        from PIL import ImageFont, ImageDraw
+        from PIL import ImageDraw
         text = read_text(input_path)
         lines = text.splitlines() or [""]
-        try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
-        except (OSError, IOError):
-            font = ImageFont.load_default()
+        font = _pil_cjk_font(18)
         # 计算尺寸
         max_w = max(font.getbbox(l)[2] - font.getbbox(l)[0] for l in lines) + 40
         line_h = (font.getbbox("Hg")[3] - font.getbbox("Hg")[1]) + 6
@@ -986,82 +990,23 @@ def _pdf_text_to_md(text):
     return md
 
 
-def _libreoffice_bin() -> str:
-    """定位 LibreOffice 可执行文件（Windows: soffice.exe；macOS/Linux: soffice）
-
-    查找顺序：环境变量 → config/ui_config.json 的 paths.libreoffice
-              → PATH → 常见安装位置 → 裸命令名
-    """
-    from config.ui_config import CONFIG as _C
-
-    # 1) 环境变量
-    env = os.environ.get("LIBREOFFICE_BIN")
-    if env and os.path.exists(env):
-        return env
-    # 2) 配置显式指定（留空表示自动探测）
-    cfg = _C.path("libreoffice")
-    if cfg and os.path.exists(cfg):
-        return cfg
-    # 3) PATH
-    p = shutil.which("soffice") or shutil.which("libreoffice")
-    if p:
-        return p
-    # 4) 常见安装位置（跨平台）
-    candidates = [
-        os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"),
-                     "LibreOffice", "program", "soffice.exe"),
-        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-                     "LibreOffice", "program", "soffice.exe"),
-        "/usr/bin/soffice",
-        "/usr/local/bin/soffice",
-        "/opt/libreoffice/program/soffice",
-    ]
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
-    return "soffice"   # 最后交给 PATH 尝试
-
-
 def _libreoffice_convert(input_path, output_path, fmt, log):
-    """调用 LibreOffice headless 转换（跨平台定位 soffice / libreoffice）"""
+    """调用共享 LibreOffice headless 转换（带独立 profile，绝不自动下载）。
+
+    定位/调用统一走 libreoffice_runtime.headless_convert（内部 find_bin(auto=False)）。
+    """
+    from core.engines import libreoffice_runtime
     try:
         out_dir = os.path.dirname(os.path.abspath(output_path)) or "."
         os.makedirs(out_dir, exist_ok=True)
-        subprocess.run(
-            [_libreoffice_bin(), "--headless", "--convert-to", fmt,
-             "--outdir", out_dir, input_path],
-            check=True, timeout=180, capture_output=True
-        )
-        # LibreOffice 输出文件名按原文件名（扩展名=目标格式）
-        base = safe_name(input_path)
-        generated = os.path.join(out_dir, f"{base}.{fmt}")
-        if os.path.exists(generated) and generated != output_path:
-            os.rename(generated, output_path)
+        generated = libreoffice_runtime.headless_convert(
+            None, input_path, out_dir, fmt, log)
+        if os.path.exists(str(generated)) and str(generated) != output_path:
+            os.rename(str(generated), output_path)
         return os.path.exists(output_path)
-    except (subprocess.SubprocessError, FileNotFoundError) as e:
+    except (libreoffice_runtime.LibreOfficeUnavailable,
+            subprocess.SubprocessError, FileNotFoundError) as e:
         log(f"⚠ LibreOffice 不可用: {e}")
-        return False
-
-
-def _html_to_images_playwright(html_path, output_path, log):
-    """用 Playwright 把 HTML 截成图片"""
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page(viewport={"width": 1280, "height": 800})
-            page.goto(f"file://{os.path.abspath(html_path).replace(os.sep, '/')}")
-            page.wait_for_load_state("networkidle")
-            # 整页截图
-            img_path = output_path if output_path.endswith(".png") else output_path + ".png"
-            page.screenshot(path=img_path, full_page=True)
-            browser.close()
-        if img_path != output_path and output_path.endswith((".jpg", ".jpeg")):
-            Image.open(img_path).convert("RGB").save(output_path, "JPEG", quality=90)
-            os.remove(img_path)
-        return True
-    except Exception as e:
-        log(f"⚠ Playwright 截图失败: {e}")
         return False
 
 

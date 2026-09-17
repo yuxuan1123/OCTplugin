@@ -1,6 +1,6 @@
 {
   "id": "md",
-  "name": "Markdown",
+  "name": "md编辑",
   "version": "1.0.0",
   "type": "Python",
   "entry": "main.py",

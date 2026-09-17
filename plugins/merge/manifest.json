@@ -1,17 +1,22 @@
 {
   "id": "merge",
   "name": "合并",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "Python",
   "entry": "main.py",
+  "python_version": "3.12",
   "ui": { "type": "web", "entry": "ui/index.html" },
-  "load_mode": "always",
+  "load_mode": "lazy",
   "permissions": ["file_read", "file_write"],
-  "dependencies": [],
+  "dependencies": [
+    { "path": "requirements.txt", "manager": "uv", "explicit": false }
+  ],
   "commands": [],
   "functions": [
-    { "name": "merge.append", "method": "merge.append", "desc": "追加/合并文本到目标文件" },
-    { "name": "merge.read", "method": "merge.read", "desc": "读取目标文件当前内容" },
-    { "name": "merge.ping", "method": "ping", "desc": "合并桥连通性" }
+    { "name": "merge.ping", "method": "merge.ping", "desc": "拼接桥连通性" },
+    { "name": "merge.formats", "method": "merge.formats", "desc": "拼接目标格式元数据 + 可达目标" },
+    { "name": "merge.scan", "method": "merge.scan", "desc": "嗅探文件夹内占多数的源文件格式" },
+    { "name": "merge.concat", "method": "merge.concat", "desc": "单文件/多文件拼接为单个文件" },
+    { "name": "merge.presets", "method": "merge.presets", "desc": "四类设置项默认值/预设" }
   ]
 }

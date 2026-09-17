@@ -271,10 +271,10 @@
     copyText(pre ? pre.querySelector("pre").textContent : "");
   });
 
-  // ── 启动：等待 OCT 桥就绪 ──
+  // ── 启动：必须等 WS 真正连接（oct.ready 派发）再拉取默认路径/列表，
+  //    否则首次打开会因「内核未连接」reject，导致默认路径需手动刷新才出现。
   function init() { refresh(); }
-  if (window.OCT && window.OCT.callPlugin) init();
-  else window.addEventListener("oct.ready", init);
+  window.addEventListener("oct.ready", init);
 
   // 初始空预览提示
   $("preview").innerHTML = '<p style="color:var(--ink-faint);">从左侧选择一个 .md 文件查看预览</p>';

@@ -3,66 +3,120 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>合并</title>
+  <title>拼接</title>
   <link rel="stylesheet" href="/res/theme/plugin.css" />
   <style>
-    /* ══ 合并 · 国风墨水 ══
-       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+    /* ══ 拼接 · 国风墨水 ══
+       1:1 复刻 OCTools 拼接页六块布局：
+       标题区 → 输入 → 目标格式(二级选择器) → 输出 → 开始拼接 → 拼接日志
+       插件内滚动：html 高 100% 隐藏，body 高 100% 溢出自有滚动条。 */
     html{ height:100%; overflow:hidden; }
-    body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto;
+    body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden;
       padding:22px; background:transparent; color:var(--ink); font-family:var(--font); }
 
+    /* ── 标题区 ── */
+    .hero{ padding:8px 2px 4px; }
+    .hero h1{ margin:0; font-size:26px; font-weight:700; letter-spacing:10px; color:var(--ink);
+      display:flex; align-items:flex-end; gap:10px; }
+    .hero h1 .ic-mark{ display:inline-block; width:10px; height:22px; border-radius:4px;
+      background:linear-gradient(135deg,#b9965f,#8f6f3d); }
+    .hero .sub{ margin-top:8px; font-size:13px; color:var(--ink-soft); letter-spacing:2px; }
+
     .card{ flex:0 0 auto; }
-    .card h3{ display:flex; align-items:center; gap:8px; }
-    .card h3 .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+    /* 带说明工具条的卡片头 */
+    .card h3.toolbar{ display:flex; align-items:center; }
+    .card h3 .side{ margin-left:auto; }
 
-    /* 路径输入行 */
-    .path-row{ display:flex; gap:10px; }
-    #path-input{
-      flex:1; background:rgba(255,252,245,.55); border:1px solid var(--line);
-      border-radius:9px; padding:9px 12px; color:var(--ink); font-family:var(--font);
-      font-size:13px; outline:none;
-    }
-    #path-input:focus{ border-color:var(--gold); }
-    .sub{ color:var(--ink-soft); font-size:12px; letter-spacing:1px; margin-top:8px; }
+    .form-grid{ display:grid; gap:12px; }
 
-    /* 文本输入 */
-    #content-area{
-      width:100%; min-height:160px; resize:vertical; background:var(--code);
-      border:1px solid var(--line); border-radius:10px; padding:12px; color:#3a352c;
-      font-family:Consolas,'Courier New',monospace; font-size:13px; line-height:1.6; outline:none;
-    }
-    #content-area:focus{ border-color:var(--gold); }
+    /* 字段行 */
+    .field label{ display:block; font-size:12px; color:var(--ink-soft); letter-spacing:2px;
+      margin-bottom:6px; }
+    .field input, .field select{ width:100%; box-sizing:border-box; background:rgba(255,252,245,.55);
+      border:1px solid var(--line); border-radius:9px; padding:9px 12px; color:var(--ink);
+      font-family:var(--font); font-size:14px; outline:none; }
+    .field input:focus, .field select:focus{ border-color:var(--gold); }
+    .field input::placeholder{ color:var(--ink-faint); }
 
-    /* 选项行 */
-    .opt-row{ display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-top:10px; }
-    .opt-row label{ display:inline-flex; align-items:center; gap:6px; font-size:13px;
-      color:var(--ink); letter-spacing:1px; cursor:pointer; }
-    .opt-row input[type=checkbox]{ accent-color:var(--gold); width:15px; height:15px; cursor:pointer; }
-    #prefix-input{
-      width:220px; background:rgba(255,252,245,.55); border:1px solid var(--line);
-      border-radius:8px; padding:7px 10px; color:var(--ink); font-family:var(--font);
-      font-size:13px; outline:none;
-    }
-    #prefix-input:focus{ border-color:var(--gold); }
+    .row{ display:flex; gap:10px; align-items:flex-end; }
+    .row .field{ flex:1; }
+    .row .field.fix{ flex:0 0 auto; }
+    .row .btn{ flex:0 0 auto; white-space:nowrap; }
 
-    /* 操作行 */
-    .act-row{ display:flex; align-items:center; gap:12px; margin-top:14px; }
-    #merge-btn{ flex:0 0 auto; height:40px; border-radius:9px; border:none;
-      cursor:pointer; font-family:var(--font); font-weight:700; letter-spacing:2px; font-size:14px;
-      background:linear-gradient(135deg,#b9965f,#8f6f3d); color:#FBF7EE;
-      transition:filter .18s; }
-    #merge-btn:hover{ filter:brightness(1.08); }
-    #merge-btn:disabled{ opacity:.5; cursor:not-allowed; }
-    #refresh-btn{ flex:0 0 auto; height:40px; }
-    .spacer{ flex:1; }
+    .hint{ font-size:12px; color:var(--ink-soft); letter-spacing:1px; margin-top:6px; }
 
-    /* 日志/预览 */
-    #log-box{
-      width:100%; height:150px; background:var(--code); border:1px solid var(--line);
-      border-radius:10px; padding:12px; color:#3a352c; overflow:auto; white-space:pre-wrap;
-      font-family:Consolas,'Courier New',monospace; font-size:12px; line-height:1.6;
-    }
+    /* ── 二级选择器：分类按钮 + 格式芯片 ── */
+    .picker{ margin-top:6px; }
+    .cats{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+    .cat-btn{ border:1px solid var(--line); background:rgba(255,252,245,.5); color:var(--ink-soft);
+      padding:6px 14px; border-radius:8px; font-size:13px; font-weight:700; letter-spacing:2px;
+      cursor:pointer; font-family:var(--font); transition:all .15s; }
+    .cat-btn:hover{ border-color:var(--gold); color:var(--ink); }
+    .cat-btn.active{ background:var(--ink); color:#FBF7EE; border-color:var(--ink); }
+
+    .chips{ display:flex; flex-wrap:wrap; gap:6px; }
+    .chip{ border:1px solid var(--line); background:rgba(255,252,245,.5); color:var(--ink);
+      padding:6px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer;
+      letter-spacing:1px; font-family:Consolas,'Courier New',monospace; transition:all .15s; }
+    .chip:hover{ border-color:var(--gold); }
+    .chip:disabled{ opacity:.35; cursor:not-allowed; text-decoration:none; }
+    .chip.active{ background:var(--gold); color:#FBF7EE; border-color:var(--gold); }
+
+    .picker-hint{ font-size:12px; color:var(--ink-faint); letter-spacing:1px; margin-top:8px; }
+
+    /* ── 预设区（按 源+目标 显隐） ── */
+    .preset-area{ margin-top:4px; padding-top:12px; border-top:1px dashed var(--line); }
+    .preset-area .head{ font-size:13px; font-weight:700; color:var(--ink); letter-spacing:2px;
+      margin-bottom:8px; }
+    .preset-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .preset-row .lbl{ font-size:12px; color:var(--ink-soft); letter-spacing:2px; }
+    .preset-row select{ background:rgba(255,252,245,.55); border:1px solid var(--line);
+      border-radius:9px; padding:8px 12px; color:var(--ink); font-family:var(--font);
+      font-size:13px; outline:none; cursor:pointer; }
+    .preset-row select:focus{ border-color:var(--gold); }
+    .preset-summary{ font-size:12px; color:var(--ink-faint); letter-spacing:1px; }
+    .preset-placeholder{ font-size:12px; color:var(--ink-faint); letter-spacing:1px; }
+
+    /* ── 开始拼接 CTA（暗金渐变主按钮，图标在左） ── */
+    .merge-cta{ width:100%; min-height:50px; background:linear-gradient(135deg,#b9965f,#8f6f3d);
+      color:#FBF7EE; border:none; border-radius:10px; font-size:16px; font-weight:700;
+      letter-spacing:4px; cursor:pointer; font-family:var(--font);
+      display:flex; align-items:center; justify-content:center; gap:10px;
+      transition:filter .15s; box-shadow:var(--shadow); }
+    .merge-cta .ic{ display:inline-block; width:16px; height:16px; background:#FBF7EE;
+      -webkit-mask:var(--ic) center/contain no-repeat; mask:var(--ic) center/contain no-repeat; }
+    .merge-cta:hover:not(:disabled){ filter:brightness(1.07); }
+    .merge-cta:disabled{ opacity:.5; cursor:not-allowed; }
+
+    /* ── 参数弹窗 ── */
+    .param-btn{ cursor:pointer; white-space:nowrap; }
+    .modal-mask{ position:fixed; inset:0; display:none; align-items:flex-start; justify-content:center;
+      background:rgba(30,27,23,.45); z-index:80; padding:48px 20px; }
+    .modal{ width:min(680px, 94vw); max-height:80vh; overflow:hidden; display:flex; flex-direction:column;
+      background:#FBF7EE; border:1px solid var(--line); border-radius:14px;
+      box-shadow:0 14px 44px rgba(0,0,0,.28); }
+    .modal-head{ display:flex; align-items:center; gap:10px; padding:13px 18px;
+      border-bottom:1px dashed var(--line); }
+    .modal-title{ font-size:15px; font-weight:700; letter-spacing:2px; color:var(--ink); }
+    .modal-x{ margin-left:auto; background:none; border:none; cursor:pointer; font-size:22px;
+      line-height:1; color:var(--ink-soft); }
+    .modal-x:hover{ color:var(--ink); }
+    .modal-body{ overflow-y:auto; padding:16px 18px; }
+    .modal-body .preset-row{ margin-bottom:10px; align-items:center; }
+    .modal-body .preset-row input[type="number"]{ width:88px; }
+    .modal-body .preset-row input[type="text"]{ min-width:120px; }
+    .modal-foot{ display:flex; justify-content:flex-end; gap:10px; padding:13px 18px;
+      border-top:1px dashed var(--line); }
+    .btn.primary{ background:linear-gradient(135deg,#b9965f,#8f6f3d); color:#FBF7EE; border:none; }
+
+    /* ── 日志区 ── */
+    .log{ min-height:170px; max-height:330px; overflow-y:auto; background:var(--code);
+      border:1px solid var(--card-line); border-radius:10px; padding:10px 14px;
+      font-family:Consolas,'Courier New',monospace; font-size:12px; line-height:1.7;
+      color:var(--ink); white-space:pre-wrap; word-break:break-all; }
+    .log .log-ok{ color:var(--celadon); }
+    .log .log-err{ color:var(--cinnabar); }
+    .log .log-warn{ color:var(--gold); }
 
     /* Toast（墨黑底） */
     .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
@@ -70,43 +124,98 @@
       font-size:12px; letter-spacing:.5px; opacity:0; transition:opacity .25s;
       pointer-events:none; z-index:99; }
     .toast.show{ opacity:1; }
-    .toast.err{ background:#7a2a22; }
+    .toast.warn{ background:#7a2a22; }
   </style>
 </head>
 <body>
 
-  <div class="card">
-    <h3><span class="dot"></span>目标文件</h3>
-    <div class="path-row">
-      <input id="path-input" type="text" spellcheck="false"
-             placeholder="输入目标文件绝对路径，例如 C:\data\out.txt" />
-      <input id="pick-file" type="file" style="display:none" />
-      <button class="btn ghost" id="pick-btn">选文件预览</button>
-    </div>
-    <div class="sub" id="preview-hint">未加载目标文件</div>
+  <!-- 块1：标题区 -->
+  <div class="hero">
+    <h1><span class="ic-mark"></span>拼　接</h1>
+    <div class="sub">把文件夹内全部同源文件合并为单个目标文件</div>
   </div>
 
+  <!-- 块2：输入 -->
   <div class="card">
-    <h3><span class="dot"></span>待合并内容</h3>
-    <textarea id="content-area" placeholder="在此粘贴要追加/合并到目标文件的内容…"></textarea>
-    <div class="opt-row">
-      <label><input type="checkbox" id="opt-newline" checked />追加前先换行</label>
-      <label><input type="checkbox" id="opt-timestamp" />加时间戳前缀</label>
-      <label style="gap:6px;">
-        <span style="color:var(--ink-soft);font-size:12px;">自定义前缀</span>
-        <input id="prefix-input" type="text" placeholder="（可选）每段前缀文本…" />
-      </label>
-    </div>
-    <div class="act-row">
-      <button id="merge-btn">合并 / 追加</button>
-      <button class="btn ghost" id="refresh-btn">刷新预览</button>
-      <div class="spacer"></div>
+    <h3>输入</h3>
+    <div class="form-grid">
+      <div class="row">
+        <div class="field"><label>源文件</label>
+          <input id="input-path" placeholder="选择源文件（单文件）…" />
+        </div>
+        <div class="field fix"><button class="btn ghost" id="browse-input">浏览</button></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>源文件夹</label>
+          <input id="folder-path" placeholder="选择源文件夹（多文件拼接）…" />
+        </div>
+        <div class="field fix"><button class="btn ghost" id="browse-folder">浏览文件夹</button></div>
+      </div>
+      <div class="hint">（源文件与源文件夹二选一；多文件拼接为单个文件）</div>
+      <div class="field" id="src-fmt-field" style="display:none">
+        <label>源文件格式</label>
+        <input id="src-fmt-input" list="src-fmt-list" placeholder="选择或输入文件夹内文件的格式…" />
+        <datalist id="src-fmt-list"></datalist>
+      </div>
     </div>
   </div>
 
+  <!-- 块3：目标格式 -->
   <div class="card">
-    <h3><span class="dot"></span>日志 / 目标文件当前内容</h3>
-    <div id="log-box">等待操作…</div>
+    <h3>目标格式</h3>
+    <div class="form-grid">
+      <div class="field">
+        <label>选择目标格式</label>
+        <div class="picker" id="dst-picker"></div>
+        <div class="picker-hint" id="dst-hint" style="display:none"></div>
+      </div>
+      <div class="preset-area" id="preset-area" style="display:none">
+        <div class="head" id="preset-head"></div>
+        <div class="preset-row" id="preset-row"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 块4：输出 -->
+  <div class="card">
+    <h3>输出</h3>
+    <div class="form-grid">
+      <div class="row">
+        <div class="field"><label>输出文件</label>
+          <input id="output-path" placeholder="选择输出文件…" />
+        </div>
+        <div class="field fix"><button class="btn ghost" id="browse-output">浏览</button></div>
+      </div>
+      <div class="hint" id="output-hint">（所有文件合并为单个文件后保存到此路径）</div>
+    </div>
+  </div>
+
+  <!-- 块5：开始拼接 -->
+  <button class="merge-cta" id="merge-btn">
+    <span class="ic" style="--ic:url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><path fill=%22%23FBF7EE%22 d=%22M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v2h-1.6v-2H3.6V11h2.2v1.6H3.5A1.5 1.5 0 0 1 2 11zM13 9v2h2v1.5h-2v2H11.5v-2h-2V11h2V9zM9 6.5 6.5 9 5.8 8.3l1-1V4.3H5.8v4h0 l-1 1L3.4 7.9 6 5.3z%22/></svg>')"></span>
+    <span id="merge-btn-label">开始拼接</span>
+  </button>
+
+  <!-- 块6：拼接日志 -->
+  <div class="card">
+    <h3 class="toolbar">拼接日志
+      <span class="side"><button class="btn ghost mini" id="clear-log">清空日志</button></span>
+    </h3>
+    <div class="log" id="log">等待开始…</div>
+  </div>
+
+  <!-- 参数弹窗 -->
+  <div class="modal-mask" id="param-mask">
+    <div class="modal">
+      <div class="modal-head">
+        <span class="modal-title" id="param-title">参数设置</span>
+        <button class="modal-x" id="param-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body" id="param-body"></div>
+      <div class="modal-foot">
+        <button class="btn primary" id="param-ok">确定</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>

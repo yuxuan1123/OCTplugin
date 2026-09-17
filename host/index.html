@@ -152,6 +152,12 @@
     .risk { color:var(--cinnabar); font-size:11px; font-weight:700; border:1px solid rgba(178,58,48,.35);
       border-radius:6px; padding:1px 6px; background:rgba(178,58,48,.06); letter-spacing:1px; }
 
+    /* ── 阶段K · LibreOffice 引擎设置 ── */
+    .lo-src { font-size:13px; color:var(--ink-soft); cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+    .lo-src input { accent-color:var(--cinnabar); }
+    .lo-progress { height:10px; border-radius:6px; background:rgba(0,0,0,.06); overflow:hidden; margin-top:10px; }
+    .lo-progress-bar { height:100%; width:0; background:var(--cinnabar); transition:width .25s ease; }
+
     /* ── 启动与资源 · 生命周期设置 ── */
     .lc-presets { display:flex; gap:10px; margin:12px 0 4px; flex-wrap:wrap; }
     .lc-presets button { flex:1 1 0; min-width:150px; }
@@ -195,6 +201,38 @@
     .pal-item .s { color:var(--ink-faint); font-size:11px; }
     .pal-item .p { color:var(--cinnabar); font-size:11px; font-weight:700; }
     .pal-empty { color:var(--ink-faint); text-align:center; padding:20px; font-size:13px; letter-spacing:2px; }
+
+    /* ── 设置重构：段1 设置列表（名称 + [设置]按钮） / 段2 表单容器（卡片） ── */
+    .settings-list { display:block; }
+    .settings-forms { display:none; }      /* 默认（主窗口）只显段1、隐段2 */
+    .sett-row { display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding:13px 18px; margin-bottom:12px; background:var(--card); border:1px solid var(--card-line);
+      border-radius:14px; box-shadow:var(--shadow); }
+    .sett-name { font-size:14px; font-weight:700; letter-spacing:2px; color:var(--ink); }
+    .sett-btn { margin:0; min-width:88px; }
+    /* 子窗口头部（仅子窗口显示）：标题 + 关闭按钮 */
+    .sett-head { display:flex; align-items:center; justify-content:space-between; gap:12px;
+      padding-bottom:14px; font-size:15px; font-weight:700; letter-spacing:2px; color:var(--ink); }
+    body.settings-window .sett-head { display:flex; }
+    .sett-close { margin:0; width:34px; height:34px; padding:0; }
+    /* 通用 DragList 拖拽反馈样式（任意列表复用）：被拖行高亮 + 跟随鼠标的虚影 */
+    li.dragging { background:rgba(168,135,90,.22); box-shadow:0 2px 10px rgba(30,27,23,.18); opacity:.85; }
+    .order-ghost { position:fixed; z-index:99999; pointer-events:none; white-space:nowrap;
+      padding:6px 12px; border-radius:8px; background:#fffdf7; color:#1e1b17; font-size:13px;
+      font-weight:600; border:1px solid #e4ddd2; box-shadow:0 8px 22px rgba(0,0,0,.24);
+      transform: translate(10px,-50%); }
+
+    /* ── 设置子窗口模式：只留设置表单项，隐藏宿主 chrome ── */
+    body.settings-window header,
+    body.settings-window nav.side,
+    body.settings-window #pluginArea { display:none !important; }
+    body.settings-window .shell { display:block; height:100%; }
+    body.settings-window .main { height:100%; overflow-y:auto; }
+    /* 强制设置面板可见（即使 openDefaultPlugin 切换 active 也不受影响：ID 选择器优先） */
+    body.settings-window .panel { display:none; }
+    body.settings-window #panel-settings { display:block; padding-top:0; }
+    body.settings-window .settings-list { display:none; }
+    body.settings-window .settings-forms { display:block; }
   </style>
 </head>
 <body>
@@ -219,7 +257,6 @@
     <nav class="side">
       <div class="nav-title">工作区</div>
       <button class="side-btn active" data-panel="settings"><span class="dot"></span>设 置</button>
-      <button class="side-btn" data-panel="debug"><span class="dot"></span>调 试</button>
       <button class="side-btn" data-panel="add"><span class="dot"></span>添加插件</button>
     </nav>
 
@@ -227,8 +264,25 @@
     <main class="main">
       <!-- 设置面板 -->
       <section class="panel active" id="panel-settings">
-        <div class="grid">
-          <div class="card">
+        <!-- 段1：设置列表（主窗口显示：每排 名称 + [设置] 按钮） -->
+        <div class="settings-list" id="settingsList">
+          <div class="sett-row"><span class="sett-name">依赖源设置</span><button class="sett-btn" data-sec="A">设置</button></div>
+          <div class="sett-row"><span class="sett-name">启动与资源 · 全局策略</span><button class="sett-btn" data-sec="B">设置</button></div>
+          <div class="sett-row"><span class="sett-name">启动与资源 · 单插件策略</span><button class="sett-btn" data-sec="C">设置</button></div>
+          <div class="sett-row"><span class="sett-name">插件排序 · 默认页</span><button class="sett-btn" data-sec="D">设置</button></div>
+          <div class="sett-row"><span class="sett-name">插件列表</span><button class="sett-btn" data-sec="E">设置</button></div>
+          <div class="sett-row"><span class="sett-name">插件权限</span><button class="sett-btn" data-sec="F">设置</button></div>
+          <div class="sett-row"><span class="sett-name">插件依赖（隔离环境）</span><button class="sett-btn" data-sec="G">设置</button></div>
+          <div class="sett-row"><span class="sett-name">已安装库及版本</span><button class="sett-btn" data-sec="H">设置</button></div>
+          <div class="sett-row"><span class="sett-name">共享函数</span><button class="sett-btn" data-sec="I">设置</button></div>
+          <div class="sett-row"><span class="sett-name">事件流</span><button class="sett-btn" data-sec="J">设置</button></div>
+          <div class="sett-row"><span class="sett-name">LibreOffice 引擎</span><button class="sett-btn" data-sec="K">设置</button></div>
+        </div>
+
+        <!-- 段2：表单容器（子窗口模式显示，只展示 data-sec == 当前 sec 的那张卡片） -->
+        <div class="settings-forms" id="settingsForms">
+          <div class="sett-head"><span id="settTitle">设置</span><button class="sett-close" id="btnSettingsClose" title="关闭">✕</button></div>
+          <div class="card" data-sec="A">
             <h2>依赖源设置</h2>
             <label>镜像源（每行一个，首行优先）</label>
             <textarea id="cfgIndex" rows="3" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple"></textarea>
@@ -237,7 +291,7 @@
             <div class="row"><button id="btnSaveCfg">保存依赖源设置</button></div>
             <pre id="cfgResult">…</pre>
           </div>
-          <div class="card" style="grid-column:1 / -1;">
+          <div class="card" data-sec="D">
             <h2>插件排序 · 默认页</h2>
             <div class="row" style="display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;">
               <label>默认打开的插件页</label>
@@ -253,7 +307,7 @@
             </div>
             <div class="box" id="orderResult">连接后可配置。</div>
           </div>
-          <div class="card">
+          <div class="card" data-sec="B">
             <h2>启动与资源 · 全局策略</h2>
             <div class="lc-toggle"><input id="gRecycle" type="checkbox"><span>启用空闲回收（非 `always` 插件空闲后回收）</span></div>
             <div class="lc-toggle"><input id="gRestart" type="checkbox"><span>启用崩溃自动重启（指数退避 + 窗口限次）</span></div>
@@ -268,7 +322,7 @@
             </div>
             <div class="box" id="lcGlobalResult">连接后加载…</div>
           </div>
-          <div class="card" style="grid-column:1 / -1;">
+          <div class="card" data-sec="C">
             <h2>启动与资源 · 单插件策略</h2>
             <div class="lc-pick">
               <input id="lcPick" type="text" list="lcPlugins" placeholder="搜索并选择插件名称或 ID…" autocomplete="off">
@@ -276,6 +330,84 @@
             </div>
             <button class="mini" id="btnLcRefresh" style="margin-top:8px">刷新</button>
             <div id="lcPerPluginBox"></div>
+          </div>
+          <!-- 调试面板卡片迁移到设置 -->
+          <div class="card" data-sec="E">
+            <h2>插件列表</h2>
+            <pre id="list">…</pre>
+          </div>
+          <div class="card" data-sec="F">
+            <h2>插件权限 <span id="grantCount" class="risk" style="display:none"></span></h2>
+            <div id="perms">连接后加载…</div>
+            <div class="row"><button class="outline" id="btnRead">经内核读文件</button></div>
+            <pre id="permResult">…</pre>
+          </div>
+          <div class="card" data-sec="G">
+            <h2>插件依赖（隔离环境）</h2>
+            <div class="lc-pick">
+              <input id="depPick" type="text" list="depPlugins" placeholder="搜索并选择插件名称或 ID…" autocomplete="off">
+              <datalist id="depPlugins"></datalist>
+              <button class="mini" id="btnDepRefresh">刷新</button>
+            </div>
+            <div class="box" id="depArea">连接后加载…</div>
+            <div class="row">
+              <button class="outline" id="btnDeps">预览依赖</button>
+              <button id="btnInstall">安装并重启</button>
+            </div>
+            <pre id="depResult">…</pre>
+          </div>
+          <div class="card" data-sec="H">
+            <h2>已安装库及版本</h2>
+            <div class="row">
+              <button id="btnEnvs">刷新已安装库</button>
+              <button class="outline" id="btnEnvsClear">清空</button>
+            </div>
+            <pre id="envsResult" style="max-height:340px;overflow:auto">点击"刷新已安装库"查看项目托管 Python、各插件 venv 与 Electron 宿主的已装库及版本…</pre>
+          </div>
+          <div class="card" data-sec="I">
+            <h2>共享函数 <button class="mini" id="btnRegRefresh">刷新</button></h2>
+            <div class="box" id="fnArea">连接后加载…</div>
+            <div class="row">
+              <button class="outline" id="btnCallFn">调用 np2.version</button>
+            </div>
+            <pre id="fnResult">…</pre>
+          </div>
+          <div class="card" data-sec="J">
+            <h2>事件流（阶段E）<button class="mini" id="btnEmit">发事件</button><button class="mini" id="btnEvClear">清屏</button></h2>
+            <pre id="evLog" style="font-size:12px;color:var(--ink-soft)">等待事件…</pre>
+          </div>
+          <div class="card" data-sec="K">
+            <h2>LibreOffice 引擎</h2>
+            <p style="font-size:12px;color:var(--ink-soft)">用于 PPT→图片版 / DOCX→PDF 的精确渲染。<br>可选：自动下载官方版 · 本地已安装目录 · 本地 MSI 安装包（网络异常时手动指定）。</p>
+            <div class="row" style="flex-wrap:wrap;gap:8px" id="loSourceRow">
+              <label class="lo-src"><input type="radio" name="loSource" value="auto"> 自动下载官方版</label>
+              <label class="lo-src"><input type="radio" name="loSource" value="dir"> 本地已安装目录</label>
+              <label class="lo-src"><input type="radio" name="loSource" value="msi"> 本地 MSI 安装包</label>
+            </div>
+            <div class="box" id="loDirRow" hidden>
+              <div class="row">
+                <input type="text" id="loDir" placeholder="选择已安装的 LibreOffice 根目录（含 program/soffice.exe）" style="flex:1">
+                <button class="mini" id="loDirPick">浏览目录</button>
+              </div>
+            </div>
+            <div class="box" id="loMsiRow" hidden>
+              <div class="row">
+                <input type="text" id="loMsi" placeholder="选择 LibreOffice MSI 安装包（.msi）" style="flex:1">
+                <button class="mini" id="loMsiPick">浏览文件</button>
+              </div>
+            </div>
+            <div class="box" id="loUrlRow">
+              <div class="row">
+                <input type="text" id="loUrl" placeholder="官方镜像地址（可留空）" style="flex:1">
+              </div>
+              <div class="row">
+                <button class="outline" id="loClearAll">清空配置</button>
+                <button id="loApply">应用配置</button>
+                <button id="loInstall">开始下载/安装</button>
+              </div>
+            </div>
+            <div class="box" id="loStatus" style="white-space:pre-wrap;font-size:12px">加载中…</div>
+            <div class="lo-progress"><div class="lo-progress-bar" id="loBar" style="width:0%"></div></div>
           </div>
         </div>
       </section>
@@ -299,8 +431,8 @@
         </div>
       </section>
 
-      <!-- 调试面板 -->
-      <section class="panel" id="panel-debug">
+      <!-- 调试面板（已合并到设置，保留 hidden 占位避免 JS 引用崩） -->
+      <section class="panel" id="panel-debug" hidden>
         <div class="grid">
           <div class="card">
             <h2>插件列表</h2>
@@ -368,6 +500,41 @@
     const setStatus = (t, c) => { $("status").textContent = t; $("status").className = "status " + c; };
     const rpc = (m, p, t) => ipcRenderer.invoke("rpc", m, p, t);
     const $$ = (sel) => document.querySelectorAll(sel);
+
+    // ── 设置子窗口模式：读取 ?view=settings&sec=…，只显示对应那张设置卡片 ──
+    // 说明：index.html 不做 auth/kport 自连内核；渲染脚本始终走 ipcRenderer.invoke("rpc") 由宿主主进程
+    // 复用内核连接。子窗口加载同一份 index.html，故这里仅需 URL 中的 view/sec 决定显示哪张表单。
+    const QP = new URLSearchParams(location.search || "");
+    const IS_SETTINGS = QP.get("view") === "settings";
+    if (IS_SETTINGS) {
+      const SEC = QP.get("sec");
+      document.body.classList.add("settings-window");
+      const names = { A: "依赖源设置", B: "启动与资源·全局策略", C: "启动与资源·单插件策略", D: "插件排序·默认页", E: "插件列表", F: "插件权限", G: "插件依赖（隔离环境）", H: "已安装库及版本", I: "共享函数", J: "事件流", K: "LibreOffice 引擎" };
+      const titleEl = document.getElementById("settTitle");
+      if (titleEl) titleEl.textContent = "设置 · " + (names[SEC] || SEC || "");
+      // 只亮出当前 sec 的卡片，其余表单隐藏（DOM 全部保留，供各加载函数引用不报错）
+      document.querySelectorAll("#settingsForms > .card").forEach(c => {
+        c.style.display = (c.dataset.sec === SEC) ? "" : "none";
+      });
+      // 关闭按钮：优先让主进程关掉本窗口，失败再退回 window.close()
+      const closeBtn = document.getElementById("btnSettingsClose");
+      if (closeBtn) closeBtn.onclick = async () => {
+        try { await ipcRenderer.invoke("win:closeSelf"); } catch (e) { window.close(); }
+      };
+      // 主窗的 kernel:ready 只发给主窗，子窗口收不到；改用宿主 rpc 桥自行填充各设置表单
+      queueMicrotask(() => {
+        if (typeof loadDepCfg === "function") loadDepCfg();
+        if (typeof refreshOrderSettings === "function") refreshOrderSettings();
+        if (typeof refreshMgmt === "function") refreshMgmt();
+        if (typeof wirePluginPicker === "function") wirePluginPicker();
+        if (typeof loadPerPluginList === "function") loadPerPluginList();
+        if (typeof refreshFns === "function") refreshFns();
+      });
+    }
+    // 设置列表：点「设置」在主窗口外打开独立设置子窗口
+    document.querySelectorAll("#settingsList .sett-btn").forEach(b => {
+      b.onclick = () => ipcRenderer.invoke("win:openSettings", { sec: b.dataset.sec });
+    });
 
     // ── 自绘窗口控制（frame:false 无边框） ──
     $("btnMin").onclick = () => ipcRenderer.send("win:minimize");
@@ -451,6 +618,8 @@
         sep.style.cssText = "margin-top:14px;";
         const anchor = document.querySelector("nav.side button[data-panel]");
         nav.insertBefore(sep, anchor.nextSibling ? anchor.nextSibling : null);
+        // 每次插到上一个按钮之后，保证 DOM 顺序与数组顺序一致（否则会反转）。
+        let prev = sep;
         web.forEach((p, i) => {
           const pid = p.pluginId;
           const btn = document.createElement("button");
@@ -468,7 +637,7 @@
             }
             switchPanel("plugin." + pid);
           };
-          nav.insertBefore(btn, sep.nextSibling);
+          nav.insertBefore(btn, prev.nextSibling); prev = btn;
           // 面板
           const sec = document.createElement("section");
           sec.className = "panel plugin-panel"; sec.id = "panel-plugin." + pid;
@@ -850,18 +1019,77 @@
       return ["home", ...ids.filter(i => i !== "home")];
     }
     let orderSelIndex = -1;
+    // 名称映射缓存：避免重绘/排序时因拿不到 plugins 列表而退化成英文 id。
+    let ORDER_NAMES = {};
     function rebuildOrderList(order, plugins) {
-      const byId = {}; (plugins || []).forEach(p => byId[p.pluginId] = p);
+      if (plugins) { ORDER_NAMES = {}; plugins.forEach(p => ORDER_NAMES[p.pluginId] = p.name || p.pluginId); }
       const ul = $("orderList"); ul.innerHTML = "";
       (order || []).forEach((id, i) => {
         const li = document.createElement("li");
-        li.dataset.id = id; li.style.cssText = "padding:6px 10px;cursor:pointer;border-radius:6px;";
-        li.textContent = `${i + 1}. ${(byId[id] && byId[id].name) || id}`;
+        li.dataset.id = id;
+        li.style.cssText = "display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:6px;"
+          + "user-select:none;-webkit-user-select:none;cursor:pointer;";
+        const h = document.createElement("span");
+        h.className = "order-hand";
+        h.style.cssText = "display:inline-flex;align-items:center;cursor:grab;flex:0 0 18px;opacity:.72;touch-action:none;";
+        h.innerHTML = `<img src="../resources/icons/menu-order.svg" alt="拖拽排序" style="width:16px;height:16px;pointer-events:none;">`;
+        const t = document.createElement("span");
+        t.style.cssText = "flex:1;";
+        t.textContent = `${i + 1}. ${ORDER_NAMES[id] || id}`;
+        li.appendChild(h); li.appendChild(t);
         li.onclick = () => { ul.querySelectorAll("li").forEach(x => x.classList.remove("active")); li.classList.add("active"); orderSelIndex = i; };
         ul.appendChild(li);
       });
       orderSelIndex = -1;
     }
+    // ── 通用可拖拽列表 DragList(ul, opts) ──
+    // 让任意 <ul>（其 <li> 内含把手选择器可选）支持 Pointer 拖拽重排，供所有需"拖拽排序"的列表统一复用。
+    // opts: { handle:'.order-hand', ghost:true, onChange:function }。
+    //   handle   —— 拖拽把手选择器（仅按住它才进入拖拽）
+    //   ghost    —— 拖动时是否显示跟随鼠标的虚影（样式类 .order-ghost）
+    //   onChange —— 每次重排后回调（可用来实时刷新预览/数据），不含首次按下
+    function DragList(ul, opts) {
+      if (!ul) return null;
+      const o = Object.assign({ handle: ".order-hand", ghost: true, onChange: null }, opts || {});
+      let drag = null, ghost = null;
+      ul.addEventListener("pointerdown", e => {
+        const h = e.target.closest ? e.target.closest(o.handle) : null;
+        if (!h || !h.closest("li")) return;
+        const li = h.closest("li");
+        li.classList.add("dragging");
+        try { h.setPointerCapture(e.pointerId); } catch (_) {}
+        drag = li;
+        if (o.ghost) {
+          ghost = document.createElement("div");
+          ghost.className = "order-ghost";
+          ghost.textContent = li.textContent.trim();
+          document.body.appendChild(ghost);
+        }
+      });
+      ul.addEventListener("pointermove", e => {
+        if (!drag) return;
+        if (ghost) { ghost.style.left = e.clientX + "px"; ghost.style.top = e.clientY + "px"; }
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        const liRed = hit && hit.closest ? hit.closest("li") : null;
+        if (!liRed || !ul.contains(liRed) || liRed === drag) return;
+        const r = liRed.getBoundingClientRect();
+        ul.insertBefore(drag, e.clientY < r.top + r.height / 2 ? liRed : liRed.nextSibling);
+        if (o.onChange) o.onChange();
+      });
+      const end = () => {
+        if (drag) drag.classList.remove("dragging");
+        drag = null;
+        if (ghost) { ghost.remove(); ghost = null; }
+      };
+      ul.addEventListener("pointerup", end);
+      ul.addEventListener("pointercancel", end);
+      return ul;
+    }
+    // 排序列表复用 DragList：拖动时实时刷新「侧栏当前顺序」预览。
+    DragList($("orderList"), { onChange: () => {
+      const order = [...$("orderList").querySelectorAll("li")].map(l => l.dataset.id);
+      refreshOrderResult(order);
+    } });
     async function refreshOrderSettings() {
       let plugins = []; try { plugins = (await rpc("plugin.list", {})).plugins || []; } catch {}
       const prefs = loadAppPrefs();
@@ -874,7 +1102,7 @@
       if (sel.querySelector('option[value="' + defaultPageId() + '"]')) sel.value = defaultPageId();
       else sel.value = "home";
       rebuildOrderList(order, plugins);
-      $("orderResult").textContent = "侧栏当前顺序：" + (order.join(" → ") || "空");
+      refreshOrderResult(order);
     }
     function applySidebarOrder() {
       const sep = document.querySelector("nav.side .nav-title.plugin-nav");
@@ -895,11 +1123,11 @@
       if (!tgt) return;
       $("orderList").insertBefore(delta < 0 ? li : tgt, delta < 0 ? tgt : li);
       const order = [...$("orderList").querySelectorAll("li")].map(l => l.dataset.id);
-      rebuildOrderList(order, null); refreshOrderResult(order);
+      rebuildOrderList(order); refreshOrderResult(order);
     }
     $("btnOrderUp").onclick = () => moveOrder(-1);
     $("btnOrderDown").onclick = () => moveOrder(1);
-    async function refreshOrderResult(order) { $("orderResult").textContent = "侧栏当前顺序：" + (order.join(" → ") || "空"); }
+    function refreshOrderResult(order) { $("orderResult").textContent = "侧栏当前顺序：" + ((order||[]).map(id => ORDER_NAMES[id] || id).join(" → ") || "空"); }
     $("btnOrderReset").onclick = async () => {
       saveAppPrefs({ ...loadAppPrefs(), pluginOrder: undefined });
       refreshOrderSettings(); applySidebarOrder(); $("orderResult").textContent = "已恢复默认：home 置首，其余按原序。";
@@ -1051,6 +1279,66 @@
       } catch (e) { $("fnResult").textContent = `调用 ${name} 失败：` + e.message; }
     };
 
+    // ── 阶段K · LibreOffice 引擎设置 ──
+    async function loStatus() {
+      try {
+        const r = await rpc("plugin.call", { pluginId: "conversion", method: "conversion.libreoffice_status", params: {} });
+        return r.result || {};
+      } catch (e) { return { error: e.message }; }
+    }
+    async function loSave(cfg) {
+      try {
+        const r = await rpc("plugin.call", { pluginId: "conversion", method: "conversion.libreoffice_set", params: cfg });
+        return r.result || {};
+      } catch (e) { return { error: e.message }; }
+    }
+    function toggleLoRows(src) { $("loDirRow").hidden = src !== "dir"; $("loMsiRow").hidden = src !== "msi"; }
+    function renderLoStatus(S) {
+      const st = S.state || {}, bin = S.bin || "";
+      const lines = [];
+      if (bin) lines.push("✅ 已可用: " + bin);
+      else lines.push("⚠ 未检测到可用 soffice");
+      if (st.phase === "download") lines.push(`⬇ 下载中 ${st.percent}%（${st.loaded_mb} / ${st.total_mb} MB）`);
+      else if (st.phase === "extract") lines.push("🔧 解压中…");
+      else if (st.phase === "done") lines.push("✅ 安装完成");
+      if (st.error) lines.push("❌ " + st.error);
+      $("loStatus").textContent = lines.join("\n") || "—";
+      $("loBar").style.width = (st.running ? (st.percent || 0) : 0) + "%";
+    }
+    let loTimer = null;
+    async function loPoll() {
+      const S = await loStatus();
+      renderLoStatus(S);
+      if (!(S.state && S.state.running)) { clearInterval(loTimer); loTimer = null; }
+    }
+    async function loadLibreoffice() {
+      const S = await loStatus();
+      if (S.error) { $("loStatus").textContent = "读取失败：" + S.error; return; }
+      const cfg = S.config || {};
+      const source = cfg.source || "auto";
+      document.querySelectorAll('input[name="loSource"]').forEach(r => { r.checked = (r.value === source); });
+      $("loDir").value = cfg.soffice_dir || ""; $("loMsi").value = cfg.msi_path || ""; $("loUrl").value = cfg.url || "";
+      toggleLoRows(source); renderLoStatus(S);
+    }
+    $("loSourceRow").onchange = e => toggleLoRows(e.target.value);
+    $("loDirPick").onclick = async () => { const r = await ipcRenderer.invoke("dialog:pickDir"); if (r && !r.canceled && r.path) $("loDir").value = r.path; };
+    $("loMsiPick").onclick = async () => { const r = await ipcRenderer.invoke("dialog:pickFile", [{ name: "MSI 安装包", extensions: ["msi"] }]); if (r && !r.canceled && r.path) $("loMsi").value = r.path; };
+    $("loApply").onclick = async () => {
+      const src = (document.querySelector('input[name="loSource"]:checked') || {}).value || "auto";
+      const S = await loSave({ source: src, soffice_dir: $("loDir").value.trim(), msi_path: $("loMsi").value.trim(), url: $("loUrl").value.trim() });
+      renderLoStatus(S); $("loStatus").textContent = "✅ 配置已保存\n" + $("loStatus").textContent;
+    };
+    $("loInstall").onclick = async () => {
+      const src = (document.querySelector('input[name="loSource"]:checked') || {}).value || "auto";
+      await loSave({ source: src, soffice_dir: $("loDir").value.trim(), msi_path: $("loMsi").value.trim(), url: $("loUrl").value.trim() });
+      const S = (await rpc("plugin.call", { pluginId: "conversion", method: "conversion.libreoffice_install", params: {} })).result || {};
+      renderLoStatus(S);
+      if (loTimer) clearInterval(loTimer);
+      loTimer = setInterval(loPoll, 600);
+    };
+    $("loClearAll").onclick = async () => { await loSave({ source: "auto", soffice_dir: "", msi_path: "", url: "" }); loadLibreoffice(); };
+    if (IS_SETTINGS) { if (typeof loadLibreoffice === "function") queueMicrotask(() => loadLibreoffice()); }
+
     ipcRenderer.on("kernel:error", (e, err) => { setStatus("启动失败", "err"); $("permResult").textContent = err; });
     // 阶段E·事件流：内核转发的 notification（event）实时显示
     let evCount = 0;
@@ -1081,7 +1369,6 @@
     // ── 命令面板（阶段D，FR-9） ──
     const SYS_CMDS = [
       { name: "/goto:settings", desc: "打开「设置」面板", kind: "sys", act: () => switchPanel("settings") },
-      { name: "/goto:debug", desc: "打开「调试」面板", kind: "sys", act: () => switchPanel("debug") },
     ];
     let PALETTE = [];     // 全部命令（sys + 内核插件命令）
     let FILTERED = [];

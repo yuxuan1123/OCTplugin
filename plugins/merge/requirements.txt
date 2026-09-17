@@ -1,0 +1,11 @@
+# merge —— 文件拼接/合并后端依赖（同格式合并器所需）
+# 格式转换(含 TTS/STT/OCR/图片→文档)已委托 conversion 插件经 registry.call 完成，
+# 因此这里只需 merge 本体"多文件合并且为单个文件"所需的重库。
+pypdf==5.1.0
+python-docx==1.1.2
+python-pptx==1.0.2
+openpyxl==3.1.5
+beautifulsoup4==4.12.3
+Pillow==11.0.0
+html2text==2024.2.26
+# ffmpeg 为外部二进制，运行时经 core.ffmpeg_utils 探测（PATH/环境变量/常见位置），非 pip 依赖。

@@ -114,12 +114,14 @@ def handle(req_id, method, params):
 
     if method == "conversion.formats":
         src = (params.get("src") or "").strip().lower()
-        reachable = reachable_targets(src) if src else []
+        mode = (params.get("mode") or "").strip().lower() or "convert"
+        reachable = reachable_targets(src, mode) if src else []
         return {
             "ok": True,
             "categories": _categories(),
             "source_formats": FMT.source_ids(),
             "all_formats": FMT.all_ids(),
+            "mode": mode,
             "reachable": reachable,
         }
 
@@ -173,6 +175,22 @@ def handle(req_id, method, params):
         if ok:
             log(f"✅ 转换成功: {output_path}")
         return {"ok": ok, "log": log.truncated(), "done": True}
+
+    if method == "conversion.libreoffice_status":
+        from core.engines import libreoffice_runtime as _LO
+        return {"ok": True, "config": _LO.load_lo_config(),
+                "bin": _LO.current_bin(), "state": _LO.export_state()}
+
+    if method == "conversion.libreoffice_set":
+        from core.engines import libreoffice_runtime as _LO
+        cfg = _LO.save_lo_config(params or {})
+        return {"ok": True, "config": cfg, "bin": _LO.current_bin(),
+                "state": _LO.export_state()}
+
+    if method == "conversion.libreoffice_install":
+        from core.engines import libreoffice_runtime as _LO
+        started = _LO.start_install(log=None)
+        return {"ok": True, "started": started, "state": _LO.export_state()}
 
     return None
 

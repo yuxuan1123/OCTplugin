@@ -185,11 +185,18 @@ def run_gui():
     sw = tk.Canvas(root, width=36, height=22, highlightthickness=0)
     hexlab = tk.Label(root, text="#000000", bg="#1e1b17", fg="#F3ECD3",
                       font=("Consolas", 13, "bold"))
-    mag = tk.Label(root, bg="#1e1b17", highlightthickness=1,
-                   highlightbackground="#a8875a", bd=0)
+    mag = tk.Canvas(root, width=MAG * ZOOM, height=MAG * ZOOM, bg="#1e1b17",
+                    highlightthickness=1, highlightbackground="#a8875a", bd=0)
+    # 先 pack 放大镜让它占满全宽，再把色块 + hexlab 排在下方第二行
+    mag.pack(side="top")
     sw.pack(side="left", padx=6, pady=6)
     hexlab.pack(side="left", padx=(0, 8))
-    mag.pack(side="top")
+    root.update_idletasks()
+    # 让 pack 把尺寸算好后冻结，后续由 geometry 全权接管位置/尺寸
+    root.pack_propagate(False)
+    _FIX_W = mag.winfo_reqwidth()
+    _FIX_H = mag.winfo_reqheight() + sw.winfo_reqheight() + 4
+    root.geometry("%dx%d" % (_FIX_W, _FIX_H))
 
     half = MAG // 2
     state = {"prev_r_down": False, "prev_l_down": False, "l_last": 0.0,
@@ -235,8 +242,16 @@ def run_gui():
             try:
                 b64 = bgra_to_png_b64(raw, MAG, MAG)
                 bmp = tk.PhotoImage(master=root, data=b64, width=MAG, height=MAG).zoom(ZOOM)
-                mag.configure(image=bmp)
+                mag.delete("all")
+                mag.create_image(0, 0, anchor="nw", image=bmp)
                 mag.image = bmp
+                # 放大镜此刻真实显示区域的中心（宽高分开取，兼容任意 DPI/缩放/布局）
+                mcx = mag.winfo_width() // 2
+                mcy = mag.winfo_height() // 2
+                mag.create_oval(mcx - 6, mcy - 6, mcx + 6, mcy + 6,
+                                outline="#a8875a", width=2)
+                mag.create_oval(mcx - 1, mcy - 1, mcx + 1, mcy + 1,
+                                outline="#a8875a", width=1)
             except Exception:
                 pass
         r, g, b = pixel(cx, cy)
@@ -247,17 +262,15 @@ def run_gui():
         else:
             hexlab.configure(text="#%02X%02X%02X" % (r, g, b), fg="#F3ECD3")
         root.update_idletasks()
-        # 跟随光标（右下偏移，贴边翻到另一侧）
-        w = mag.winfo_reqwidth()
-        hh = mag.winfo_reqheight() + sw.winfo_reqheight() + 4
+        # 跟随光标（右下偏移，贴边翻到另一侧）——尺寸已在初始化时冻结，这里只改位置
         vw = user32.GetSystemMetrics(0)
         vh = user32.GetSystemMetrics(1)
         ox, oy = OFF, OFF
-        if cx + ox + w > vw:
-            ox = -w - OFF
-        if cy + oy + hh > vh:
-            oy = -hh - OFF
-        root.geometry("%dx%d+%d+%d" % (w, hh, cx + ox, cy + oy))
+        if cx + ox + _FIX_W > vw:
+            ox = -_FIX_W - OFF
+        if cy + oy + _FIX_H > vh:
+            oy = -_FIX_H - OFF
+        root.geometry("+%d+%d" % (cx + ox, cy + oy))
         root.lift()
         root.after(30, poll)
 

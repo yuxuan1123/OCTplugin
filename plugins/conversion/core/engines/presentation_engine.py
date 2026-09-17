@@ -19,6 +19,7 @@ OCTools/core/engines/presentation_engine.py
 
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -280,66 +281,54 @@ def pptx_to_pdf(input_path, output_path, log):
         log(f"❌ {e}"); return False
 
 
-def pptx_to_pptx_image(input_path, output_path, log, dpi=300):
+def pptx_to_pptx_image(input_path, output_path, log, dpi=200):
     """PPTX → 图片版 PPTX（防乱码 / 防修改）
 
-    使用 PowerPoint COM 将每页导出为高清 PNG，
-    再重新组装成图片铺满的 PPTX，确保跨设备显示一致。
-
-    仅支持 Windows + Microsoft PowerPoint。
+    使用内部打包的 LibreOffice headless 将每页导出为高清 PNG（先转 PDF，
+    再逐页渲染为图片），再重新组装成图片铺满的 PPTX，确保跨设备显示一致。
+    不再依赖 Microsoft PowerPoint / win32com。
     """
+    from core.engines import libreoffice_runtime
+    from core.engines.document_engine import _pdf_to_images
+
     if not file_exists(input_path, log): return False
-    if not os.name == "nt":
-        log("❌ 此功能仅支持 Windows + Microsoft PowerPoint")
-        return False
 
     try:
-        import win32com.client
-    except ImportError:
-        log("❌ 缺少 pywin32 依赖，请执行: pip install pywin32")
+        bin_path = libreoffice_runtime.find_bin(log, auto=False)
+    except libreoffice_runtime.LibreOfficeUnavailable as e:
+        log(f"❌ {e}")
         return False
 
     temp_dir = None
     try:
         log(f"🔄 PPTX → 图片版PPTX: {input_path}")
-        log(f"   清晰度: {dpi} DPI")
 
-        # ── 步骤1: 用 PowerPoint 导出每页为 PNG ──
+        # ── 步骤1: LibreOffice headless 转 PDF ──
         temp_dir = Path(tempfile.mkdtemp(prefix="pptx2img_"))
+        log("   调用 LibreOffice 导出 PDF…")
+        try:
+            pdf_file = libreoffice_runtime.headless_convert(bin_path, input_path, str(temp_dir), "pdf", log)
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            log(f"❌ LibreOffice 转换失败: {e}")
+            return False
+        if not pdf_file.exists() or pdf_file.stat().st_size == 0:
+            log("❌ LibreOffice 未能生成 PDF（可能缺少渲染组件）")
+            return False
+        log(f"   ✅ 已生成 PDF: {pdf_file}")
+
+        # ── 步骤2: PDF 每页渲染为 PNG ──
         images_dir = temp_dir / "images"
         images_dir.mkdir(exist_ok=True)
-
-        log("   启动 PowerPoint...")
-        ppt = win32com.client.Dispatch("PowerPoint.Application")
-        ppt.Visible = True
-        ppt.DisplayAlerts = False
-
-        try:
-            pres = ppt.Presentations.Open(str(Path(input_path).absolute()))
-            slide_count = pres.Slides.Count
-            log(f"   共检测到 {slide_count} 页")
-
-            # 根据页面尺寸计算像素
-            slide_width_inch = pres.PageSetup.SlideWidth / 72
-            slide_height_inch = pres.PageSetup.SlideHeight / 72
-            img_w = int(slide_width_inch * dpi)
-            img_h = int(slide_height_inch * dpi)
-
-            for i in range(1, slide_count + 1):
-                img_path = images_dir / f"slide_{i:03d}.png"
-                pres.Slides.Item(i).Export(
-                    str(img_path.absolute()), "PNG", img_w, img_h
-                )
-                log(f"   ✅ 导出第 {i}/{slide_count} 页")
-
-            pres.Close()
-        finally:
-            ppt.Quit()
-
+        if not _pdf_to_images(str(pdf_file), str(images_dir), log, "png"):
+            log("❌ PDF 转图片失败")
+            return False
         image_paths = sorted(images_dir.glob("*.png"))
-        log(f"   🎉 全部页面导出完成，共 {len(image_paths)} 张图片")
+        if not image_paths:
+            log("❌ 未导出任何页面")
+            return False
+        log(f"   共 {len(image_paths)} 页")
 
-        # ── 步骤2: 重新组装成图片版 PPTX ──
+        # ── 步骤3: 重新组装成图片版 PPTX ──
         log("   开始生成图片版PPTX...")
         prs = Presentation()
 

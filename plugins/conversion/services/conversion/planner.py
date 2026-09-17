@@ -15,6 +15,12 @@ def _norm(fmt: str) -> str:
     return FMT.resolve(fmt)
 
 
+# 图片版等同格式：目标 id → 其基础格式 id（转换时输出扩展名用基础格式，见 main.py / batch.py）。
+# 例如 UI 目标「PPT 图片版」(pptx-img)，实际产物扩展名是 .pptx → REGISTRY 直达键 (pptx,pptx)。
+# 仅当源恰为基础格式时该目标才可达（避免其它源误选）。
+_DERIVED_TARGETS = {"pptx-img": "pptx"}
+
+
 def is_reachable(src: str, dst: str) -> bool:
     src, dst = _norm(src), _norm(dst)
     if not src or not dst:
@@ -45,6 +51,9 @@ def can_batch(src: str, dst: str) -> bool:
     src, dst = _norm(src), _norm(dst)
     if src in set(FMT.media_image_ids()) and dst in set(FMT.doc_ids()):
         return False
+    base = _DERIVED_TARGETS.get(dst)
+    if base and base == src:
+        return is_reachable(src, base)  # pptx → pptx-img「PPT 图片版」
     return is_reachable(src, dst)
 
 

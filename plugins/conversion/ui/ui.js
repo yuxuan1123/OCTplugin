@@ -541,11 +541,6 @@
     wireModal();
   }
 
-  // 初始：等桥就绪后绑事件 + 加载格式
-  function start() {
-    if (window.OCT) { bind(); loadFormats(); return; }
-    setTimeout(start, 60);
-  }
+  // 统一等 WS 真正连接（oct.ready）再加载，避免提前调用后端失败。
   window.addEventListener("oct.ready", () => { bind(); loadFormats(); });
-  start();
 })();
