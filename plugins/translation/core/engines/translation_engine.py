@@ -31,6 +31,7 @@ from config.translator_config import (
 #  模型路径
 # ════════════════════════════════════════════
 
+# 默认根目录（来自 ui_config / 环境变量 OCTTR_MODEL_opus_base）
 EN2ZH_CT2_DIR = os.path.join(OPUS_MT_BASE, "opus-mt-en-zh-ct2")
 EN2ZH_SRC_SPM = os.path.join(OPUS_MT_BASE, "raw_en-zh", "source.spm")
 EN2ZH_TGT_SPM = os.path.join(OPUS_MT_BASE, "raw_en-zh", "target.spm")
@@ -38,6 +39,24 @@ EN2ZH_TGT_SPM = os.path.join(OPUS_MT_BASE, "raw_en-zh", "target.spm")
 ZH2EN_CT2_DIR = os.path.join(OPUS_MT_BASE, "opus-mt-zh-en-ct2")
 ZH2EN_SRC_SPM = os.path.join(OPUS_MT_BASE, "raw_zh-en", "source.spm")
 ZH2EN_TGT_SPM = os.path.join(OPUS_MT_BASE, "raw_zh-en", "target.spm")
+
+
+def resolve_opus_paths(base: str = ""):
+    """按给定模型根目录（优先当前配置的 opusmt_base）解析 Opus-MT 全部路径。
+
+    根目录缺省时回落为 ui_config 的 OPUS_MT_BASE（env OCTTR_MODEL_opus_base）。
+    这样设置面板里保存的 opusmt_base 会即时生效。
+    """
+    base = (base or "").strip() or OPUS_MT_BASE
+    return {
+        "base": base,
+        "en2zh_ct2": os.path.join(base, "opus-mt-en-zh-ct2"),
+        "en2zh_src_spm": os.path.join(base, "raw_en-zh", "source.spm"),
+        "en2zh_tgt_spm": os.path.join(base, "raw_en-zh", "target.spm"),
+        "zh2en_ct2": os.path.join(base, "opus-mt-zh-en-ct2"),
+        "zh2en_src_spm": os.path.join(base, "raw_zh-en", "source.spm"),
+        "zh2en_tgt_spm": os.path.join(base, "raw_zh-en", "target.spm"),
+    }
 
 DIRECTION_LABELS = {
     "zh2en": "中 → 英",
@@ -109,24 +128,29 @@ def _is_garbage_output(text: str) -> bool:
 
 
 # ════════════════════════════════════════════
-#  引擎懒加载单例（Opus-MT）
+#  引擎懒加载单例（Opus-MT，按 模型根目录 缓存）
 # ════════════════════════════════════════════
 
-_EN2ZH = {"translator": None, "sp_src": None, "sp_tgt": None}
-_ZH2EN = {"translator": None, "sp_src": None, "sp_tgt": None}
+# base -> {"direction": {"translator","sp_src","sp_tgt"}}
+_CT2_CACHE = {}
 
 
-def _check_models_ready():
+def _check_models_ready(base: str = ""):
     """预检模型/分词器文件是否存在，给出明确报错"""
-    missing = [p for p in (
-        EN2ZH_CT2_DIR, EN2ZH_SRC_SPM, EN2ZH_TGT_SPM,
-        ZH2EN_CT2_DIR, ZH2EN_SRC_SPM, ZH2EN_TGT_SPM,
-    ) if not os.path.exists(p)]
+    p = resolve_opus_paths(base)
+    missing = [v for k, v in (
+        ("opus-mt-en-zh-ct2", p["en2zh_ct2"]),
+        ("raw_en-zh\\source.spm", p["en2zh_src_spm"]),
+        ("raw_en-zh\\target.spm", p["en2zh_tgt_spm"]),
+        ("opus-mt-zh-en-ct2", p["zh2en_ct2"]),
+        ("raw_zh-en\\source.spm", p["zh2en_src_spm"]),
+        ("raw_zh-en\\target.spm", p["zh2en_tgt_spm"]),
+    ) if not os.path.exists(v)]
     if missing:
         raise RuntimeError(
             "❌ 翻译模型缺失，请先准备好 Opus-MT 模型目录：\n  "
             + "\n  ".join(missing)
-            + f"\n模型根目录: {OPUS_MT_BASE}")
+            + f"\n模型根目录: {p['base']}")
 
 
 def _ensure_deps():
@@ -140,32 +164,32 @@ def _ensure_deps():
             "  pip install ctranslate2 sentencepiece") from e
 
 
-def _ensure_en2zh():
-    """加载 英→中 引擎（懒加载 + 缓存）"""
-    if _EN2ZH["translator"] is not None:
-        return _EN2ZH
-    _check_models_ready()
+def _ensure_opusmt(direction: str, base: str = ""):
+    """加载 Opus-MT 引擎（懒加载 + 按模型根目录缓存）"""
+    p = resolve_opus_paths(base)
+    chunk = _CT2_CACHE.get(p["base"])
+    if chunk is None:
+        _CT2_CACHE[p["base"]] = chunk = {
+            "zh2en": {"translator": None, "sp_src": None, "sp_tgt": None},
+            "en2zh": {"translator": None, "sp_src": None, "sp_tgt": None},
+        }
+    eng = chunk[direction]
+    if eng["translator"] is not None:
+        return eng
+    _check_models_ready(p["base"])
     spm = _ensure_deps()
     import ctranslate2
-    _EN2ZH["translator"] = ctranslate2.Translator(
-        EN2ZH_CT2_DIR, device="cpu", compute_type="int8")
-    _EN2ZH["sp_src"] = spm.SentencePieceProcessor(model_file=EN2ZH_SRC_SPM)
-    _EN2ZH["sp_tgt"] = spm.SentencePieceProcessor(model_file=EN2ZH_TGT_SPM)
-    return _EN2ZH
-
-
-def _ensure_zh2en():
-    """加载 中→英 引擎（懒加载 + 缓存）"""
-    if _ZH2EN["translator"] is not None:
-        return _ZH2EN
-    _check_models_ready()
-    spm = _ensure_deps()
-    import ctranslate2
-    _ZH2EN["translator"] = ctranslate2.Translator(
-        ZH2EN_CT2_DIR, device="cpu", compute_type="int8")
-    _ZH2EN["sp_src"] = spm.SentencePieceProcessor(model_file=ZH2EN_SRC_SPM)
-    _ZH2EN["sp_tgt"] = spm.SentencePieceProcessor(model_file=ZH2EN_TGT_SPM)
-    return _ZH2EN
+    if direction == "zh2en":
+        eng["translator"] = ctranslate2.Translator(
+            p["zh2en_ct2"], device="cpu", compute_type="int8")
+        eng["sp_src"] = spm.SentencePieceProcessor(model_file=p["zh2en_src_spm"])
+        eng["sp_tgt"] = spm.SentencePieceProcessor(model_file=p["zh2en_tgt_spm"])
+    else:
+        eng["translator"] = ctranslate2.Translator(
+            p["en2zh_ct2"], device="cpu", compute_type="int8")
+        eng["sp_src"] = spm.SentencePieceProcessor(model_file=p["en2zh_src_spm"])
+        eng["sp_tgt"] = spm.SentencePieceProcessor(model_file=p["en2zh_tgt_spm"])
+    return eng
 
 
 # ════════════════════════════════════════════
@@ -247,7 +271,7 @@ def models_ready(config=None) -> bool:
     try:
         if cfg.engine == "hy":
             return os.path.exists(cfg.hy_model_path)
-        _check_models_ready()
+        _check_models_ready(cfg.opusmt_base)
         return True
     except Exception:
         return False
@@ -261,9 +285,9 @@ def warmup(direction: str = "auto", config=None) -> bool:
             _ensure_hy(cfg)
             return True
         if direction in ("auto", "zh2en"):
-            _ensure_zh2en()
+            _ensure_opusmt("zh2en", cfg.opusmt_base)
         if direction in ("auto", "en2zh"):
-            _ensure_en2zh()
+            _ensure_opusmt("en2zh", cfg.opusmt_base)
         return True
     except Exception:
         return False
@@ -273,15 +297,15 @@ def warmup(direction: str = "auto", config=None) -> bool:
 #  核心翻译
 # ════════════════════════════════════════════
 
-def _translate_once(text: str, direction: str) -> str:
+def _translate_once(text: str, direction: str, base: str = "") -> str:
     """翻译单段文本（不切分），方向已归一化到 zh2en / en2zh。"""
     if direction == "zh2en":
-        eng = _ensure_zh2en()
+        eng = _ensure_opusmt("zh2en", base)
         tokens = eng["sp_src"].encode(text, out_type=str) + [""]
         results = eng["translator"].translate_batch([tokens])
         out = eng["sp_tgt"].decode(results[0].hypotheses[0])
         return "" if _is_garbage_output(out) else out.strip()
-    eng = _ensure_en2zh()
+    eng = _ensure_opusmt("en2zh", base)
     tokens = eng["sp_src"].encode(f">>cmn_Hans<< {text}", out_type=str) + [""]
     results = eng["translator"].translate_batch([tokens])
     out = _strip_tag_leak(eng["sp_tgt"].decode(results[0].hypotheses[0]))
@@ -302,6 +326,24 @@ def _split_paragraphs(text: str) -> list:
         else:
             out.append(p)
     return out or [text.strip()]
+
+
+def release():
+    """释放已加载的翻译引擎缓存（Opus-MT ctranslate2 + Hy-MT2 llama），并 gc.collect()。
+
+    供闲置回收器 / 模型管理调用；释放后下次 translate 会重新懒加载。
+    """
+    import gc
+    global _HY_LLM, _HY_LLM_KEY
+    _CT2_CACHE.clear()
+    if _HY_LLM is not None:
+        try:
+            _HY_LLM.close()
+        except Exception:
+            pass
+        _HY_LLM = None
+        _HY_LLM_KEY = None
+    gc.collect()
 
 
 def translate(text: str, direction: str = "auto", log=None, config=None) -> str:
@@ -325,6 +367,16 @@ def translate(text: str, direction: str = "auto", log=None, config=None) -> str:
     if direction == "auto":
         direction = "zh2en" if detect_language(text) == "zh" else "en2zh"
 
+    # 重置所用模型引擎的闲置计时（模型管理用空闲回收），并按下 store 策略自注册
+    try:
+        from core.idle_manager import get_manager
+        from resources import register_engine
+        _key = "hymt2" if cfg.engine == "hy" else "opusmt"
+        register_engine(_key, release)
+        get_manager().touch(_key)
+    except Exception:
+        pass
+
     hy_target = "中文" if direction == "en2zh" else "英文"
     eng_label = ENGINE_LABELS.get(cfg.engine, cfg.engine)
     if cfg.engine == "hy":
@@ -338,7 +390,7 @@ def translate(text: str, direction: str = "auto", log=None, config=None) -> str:
             if cfg.engine == "hy":
                 out = _translate_hy_once(para, hy_target, cfg)
             else:
-                out = _translate_once(para, direction)
+                out = _translate_once(para, direction, cfg.opusmt_base)
         except Exception as e:
             if log:
                 log(f"   ⚠ 第 {i + 1} 段翻译失败: {e}")

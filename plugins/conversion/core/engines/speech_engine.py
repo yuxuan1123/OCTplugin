@@ -89,7 +89,32 @@ def _to_16k_mono_wav(audio_path: str, log) -> str:
 #  识别
 # ════════════════════════════════════════════
 
+def _touch_stt():
+    """重置语音识别模型闲置计时（模型管理用空闲回收），并按下 store 策略自注册"""
+    try:
+        from core.idle_manager import get_manager
+        from resources import register_engine
+        register_engine("stt", release)
+        get_manager().touch("stt")
+    except Exception:
+        pass
+
+
+def release():
+    """释放已加载的 funasr 识别器缓存，并 gc.collect()。释放后下次惰性重建。"""
+    global _STT_MODEL, _STT_MODEL_KEY
+    import gc
+    _STT_MODEL = None
+    _STT_MODEL_KEY = None
+    gc.collect()
+
+
 def transcribe_audio(audio_path, log=lambda m: print(m), config=None) -> str:
+    _touch_stt()
+    return _transcribe_audio_impl(audio_path, log, config)
+
+
+def _transcribe_audio_impl(audio_path, log, config) -> str:
     """识别音频并返回文本（含标点）；失败抛异常或返回 ""。"""
     cfg = config or default_config()
     errors = cfg.validate()

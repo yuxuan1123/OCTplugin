@@ -1,0 +1,8 @@
+[
+  {"key": "kokoro", "label": "Kokoro 语音合成", "type": "model"},
+  {"key": "moss", "label": "MOSS 语音合成", "type": "model"},
+  {"key": "stt", "label": "SenseVoice 语音识别", "type": "model"},
+  {"key": "libreoffice", "label": "LibreOffice 引擎", "type": "binary", "variant": "lo"},
+  {"key": "bin.ffmpeg", "label": "FFmpeg 媒体引擎", "type": "binary"},
+  {"key": "bin.pandoc", "label": "Pandoc 文档引擎", "type": "binary"}
+]

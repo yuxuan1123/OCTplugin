@@ -22,3 +22,5 @@ kokoro==0.9.4
 misaki[zh]==0.9.4
 onnxruntime==1.21.1
 edge_tts==7.2.8
+# SVG → 位图改由 Node 子进程 sharp 渲染（apps/sharp_worker.js + 局部 node_modules），
+# 不再需要 cairosvg（Windows 依赖 cairo 系统 DLL）。安装：插件目录 npm install。

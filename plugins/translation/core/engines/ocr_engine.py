@@ -79,12 +79,32 @@ def warmup_ocr(lang: str = "ch") -> bool:
         return False
 
 
+def _touch_ocr():
+    """重置 OCR 模型闲置计时（模型管理用空闲回收），并按下 store 策略自注册"""
+    try:
+        from core.idle_manager import get_manager
+        from resources import register_engine
+        register_engine("paddle", release)
+        get_manager().touch("paddle")
+    except Exception:
+        pass
+
+
+def release():
+    """释放已加载的 PaddleOCR 实例缓存，并 gc.collect()。占用释放后下次惰性重建。"""
+    import gc
+    _OCR.clear()
+    _OCR_FAILED.clear()
+    gc.collect()
+
+
 # ════════════════════════════════════════════
 #  识别入口
 # ════════════════════════════════════════════
 
 def ocr_image(image_path: str, lang: str = "ch") -> str:
     """识别单张图片，返回识别出的文本（每行一条）"""
+    _touch_ocr()
     ocr = get_ocr(lang)
     result = ocr.predict(image_path)
     lines = []

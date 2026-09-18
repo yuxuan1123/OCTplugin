@@ -1,0 +1,29 @@
+# translation 插件重依赖（内核用 uv 装到 deps/translation/.venv）
+# 模型：Hy-MT2-1.8B（llama-cpp GGUF）/ Opus-MT（ctranslate2+SPM）
+# OCR：PaddleOCR PP-OCRv6_tiny（onnxruntime）
+# ASR：sherpa-onnx 离线推理（funasr/Paraformer ONNX：model.onnx + tokens.txt）
+
+# ── 必装依赖（全部有预编译轮子，保证 uv pip install 一次通过） ──
+# 说明：llama-cpp-python（Hy-MT2-1.8B 默认引擎）在 Windows 无预编译轮子，
+# 需从源码 MSVC 编译，常导致整条依赖安装失败；故移出必装清单，
+# 由后端在用户切换到 Hy 引擎时按需自动安装（translation.engine.installhy）。
+
+# 文本翻译引擎（Opus-MT：ctranslate2 + SPM，开箱可用）
+ctranslate2>=3.22.0
+sentencepiece>=0.1.99
+
+# OCR（PaddleOCR PP-OCRv6_tiny 走 onnxruntime）
+paddleocr>=2.8.0
+onnxruntime>=1.17.0
+
+# 语音识别（sherpa-onnx 离线推理）
+sherpa-onnx>=1.9.0
+
+# 音频采集（Windows WASAPI loopback；仅此版本可解析）
+pyaudiowpatch==0.2.12.8
+
+# 通用
+numpy>=1.24
+pillow>=10.0
+mss>=9.0.1
+pypdfium2>=4.30.0

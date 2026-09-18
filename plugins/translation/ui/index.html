@@ -7,34 +7,71 @@
   <link rel="stylesheet" href="/res/theme/plugin.css" />
   <style>
     /* ══ 翻译 · 国风墨水 ══
-       策略 A：插件内部滚动，滚动条 = 整块右侧满高一条。 */
+       OCTools 翻译页排版：方向 → 屏幕翻译 → 语音翻译 → 原文 → 开始 → 译文 → 日志。 */
     html{ height:100%; overflow:hidden; }
     body{ margin:0; height:100%; box-sizing:border-box; overflow-y:auto; overflow-x:hidden;
       padding:22px; background:transparent; color:var(--ink); font-family:var(--font); }
 
-    .card{ flex:0 0 auto; }
     .card h3{ display:flex; align-items:center; gap:8px; }
     .card h3 .dot{ width:8px; height:8px; border-radius:99px; background:var(--gold); }
+
+    /* 方向 / 引擎并排 */
+    .grid2{ display:grid; gap:16px; grid-template-columns:1fr 1fr; }
+    @media (max-width:720px){ .grid2{ grid-template-columns:1fr; } }
+
+    /* 引擎默认说明 Hint */
+    .engine-hint{ font-size:12px; color:var(--ink-soft); letter-spacing:.5px; line-height:1.6; }
+
+    /* 缺模型警告条（暗金） */
+    .warn-bar{ display:none; margin-top:12px; background:rgba(168,135,90,.12);
+      border:1px solid var(--gold); color:var(--gold); border-radius:9px;
+      padding:9px 12px; font-size:12px; line-height:1.7; letter-spacing:.5px; }
+    .warn-bar .b{ font-weight:700; }
+
+    /* 应用行（屏幕翻译 / 语音翻译） */
+    .app-row{ display:flex; align-items:center; gap:12px; padding:11px 12px;
+      background:rgba(255,252,245,.45); border:1px solid var(--line); border-radius:10px; margin-bottom:8px; }
+    .app-row:last-child{ margin-bottom:0; }
+    .app-ic{ width:32px; height:32px; flex:none; border-radius:8px; display:flex;
+      align-items:center; justify-content:center; background:var(--card);
+      border:1px solid var(--card-line); color:var(--gold); font-size:15px; }
+    .app-name{ font-size:14px; font-weight:700; color:var(--ink); letter-spacing:1px; }
+    .app-hint{ font-size:12px; color:var(--ink-faint); letter-spacing:.5px; margin-top:2px; }
+    .app-body{ flex:1; min-width:0; }
+    .app-side{ display:flex; align-items:center; gap:10px; flex:none; }
+
+    /* 状态点：灰=未启动，暗金=运行中 */
+    .status-dot{ width:9px; height:9px; border-radius:99px; background:var(--ink-faint); transition:background .2s; }
+    .status-dot.on{ background:var(--gold); }
+    .app-side .st{ font-size:11px; color:var(--ink-soft); letter-spacing:1px; min-width:3em; }
+
+    /* 开始翻译 主按钮 */
+    .translate-wrap{ margin:0 0 16px; }
+    .btn.main{ width:100%; padding:13px; font-size:15px; letter-spacing:6px; box-shadow:var(--shadow); }
 
     textarea{ width:100%; background:var(--code); border:1px solid var(--line);
       border-radius:10px; padding:12px; color:#3a352c; font-family:var(--font);
       font-size:14px; line-height:1.7; resize:vertical; outline:none; box-sizing:border-box; }
     textarea:focus{ border-color:var(--gold); }
-    #src{ min-height:120px; }
-    #res{ min-height:120px; cursor:text; }
+    #src{ min-height:140px; }
+    #res{ min-height:140px; cursor:text; }
 
-    .toolbar{ display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap; }
-    .toolbar .field{ flex:1 1 220px; min-width:0; }
-    .toolbar .actions{ display:flex; gap:10px; align-items:center; }
+    .toolbar{ display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
+    .toolbar .spacer{ flex:1; }
 
-    /* 目标语种提示 */
-    .hint{ color:var(--ink-soft); font-size:12px; letter-spacing:1px; margin-left:2px; }
-
-    /* 结果头部：源语种标签 + 复制 */
+    /* 结果头部 */
     .res-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; }
     .tag.done{ color:var(--gold); }
-    .tag .dot{ background:var(--gold); }
+    .tag.done .dot{ background:var(--gold); }
     .res-head .muted{ flex:1; }
+
+    /* 日志 */
+    .loghead{ display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+    .loghead .muted{ flex:1; }
+    .code.log{ height:220px; overflow-y:auto; }
+    .code.log .ln{ padding:1px 0; white-space:pre-wrap; word-break:break-word; }
+    .code.log .ln.err{ color:var(--cinnabar); }
+    .code.log .ln.ok{ color:#3a352c; }
 
     /* Toast（墨黑底） */
     .toast{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%);
@@ -46,32 +83,73 @@
 </head>
 <body>
 
+  <!-- ① 方向卡片 -->
   <div class="card">
-    <h3><span class="dot"></span>源文本</h3>
-    <textarea id="src" placeholder="输入要翻译的文本…"></textarea>
-    <div class="toolbar">
+    <h3><span class="dot"></span>翻译方向</h3>
+    <div class="grid2">
       <div class="field">
-        <label>译成</label>
-        <select id="to"></select>
+        <label>翻译方向</label>
+        <select id="dir-select"></select>
       </div>
-      <div class="actions">
-        <button class="btn" id="translate-btn">翻 译</button>
-        <button class="btn ghost" id="clear-btn">清空</button>
+      <div class="field">
+        <label>翻译引擎</label>
+        <select id="engine-select"></select>
       </div>
     </div>
-    <div class="hint">自动检测源语种；联网调用免费公开翻译接口。</div>
+    <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
+      <button class="btn ghost" id="params-btn">模型参数…</button>
+      <span class="engine-hint" id="engine-hint"></span>
+    </div>
+    <div class="warn-bar" id="model-warn"><span class="b">⚠ 模型提示</span> <span id="model-warn-text"></span></div>
   </div>
 
+  <!-- ② 屏幕翻译卡片 -->
+  <div class="card">
+    <h3><span class="dot"></span>屏幕翻译</h3>
+    <div id="screen-apps"></div>
+  </div>
+
+  <!-- ③ 语音翻译卡片 -->
+  <div class="card">
+    <h3><span class="dot"></span>语音翻译</h3>
+    <div id="voice-apps"></div>
+  </div>
+
+  <!-- ④ 原文卡片 -->
+  <div class="card">
+    <h3><span class="dot"></span>原文</h3>
+    <textarea id="src" placeholder="输入要翻译的文本，或点击「载入文件…」读取文本文件…"></textarea>
+    <div class="toolbar">
+      <button class="btn ghost" id="load-btn">载入文件…</button>
+      <button class="btn ghost" id="clear-btn">清空</button>
+    </div>
+  </div>
+
+  <!-- ⑤ 开始翻译 -->
+  <div class="translate-wrap"><button class="btn main" id="translate-btn">开始翻译</button></div>
+
+  <!-- ⑥ 译文卡片 -->
   <div class="card">
     <h3><span class="dot"></span>译文</h3>
     <div class="res-head">
       <span class="tag done" id="src-tag"><span class="dot"></span>自动检测</span>
-      <span class="muted">翻译结果将显示在这里…</span>
+      <span class="muted" id="res-muted">翻译结果将显示在这里…</span>
     </div>
     <textarea id="res" readonly></textarea>
     <div class="toolbar">
       <button class="btn" id="copy-btn">复制译文</button>
+      <button class="btn ghost" id="save-btn">保存译文…</button>
     </div>
+  </div>
+
+  <!-- ⑦ 日志卡片 -->
+  <div class="card">
+    <h3><span class="dot"></span>日志</h3>
+    <div class="loghead">
+      <span class="muted" id="log-state">等待翻译…</span>
+      <button class="btn ghost mini" id="log-clear">清空</button>
+    </div>
+    <div class="code log" id="log"></div>
   </div>
 
   <div class="toast" id="toast"></div>

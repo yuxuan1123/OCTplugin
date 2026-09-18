@@ -8,8 +8,8 @@ import os
 import json
 from dataclasses import dataclass
 
-# 默认边框颜色
-DEFAULT_BORDER_COLOR = "#3B82F6"
+# 默认边框颜色（国风墨水主题暗金，与插件配色一致）
+DEFAULT_BORDER_COLOR = "#a8875a"
 
 
 @dataclass

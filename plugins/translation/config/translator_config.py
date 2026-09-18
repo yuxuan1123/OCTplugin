@@ -53,6 +53,7 @@ class TranslatorConfig:
     overlay_font_size: int = 14          # 译文悬浮窗字号（px）
     overlay_mode: str = "both"           # both=双语（原文+译文） / trans=仅译文
     overlay_bg_color: str = "#FFFFFF"    # 悬浮窗背景色（#RRGGBB 或 transparent）
+    overlay_alpha: float = 0.95          # 悬浮窗不透明度（0~1，transparent 背景时生效）
     overlay_movable: bool = True         # 悬浮窗是否可移动
     overlay_resizable: bool = True       # 悬浮窗是否可调整大小
     overlay_pin_default: bool = False    # 启动时默认是否已「固定」

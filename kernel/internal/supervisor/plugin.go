@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -89,7 +90,7 @@ func (p *Plugin) Start(pythonPath string) error {
 	if pyVersion == "" {
 		pyVersion = "3.12"
 	}
-	cmd := exec.Command(pythonPath, p.Manifest.Entry)
+	cmd := exec.Command(pythonPath, filepath.Join(p.Manifest.Dir, p.Manifest.Entry))
 	cmd.Dir = p.Manifest.Dir
 	hideConsoleWindow(cmd) // Windows: 不弹黑窗口；其它平台：空实现
 

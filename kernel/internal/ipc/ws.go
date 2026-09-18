@@ -177,7 +177,11 @@ func (s *Server) handle(conn *websocket.Conn) {
 			s.reply(conn, protocol.NewError(0, protocol.ErrParse, nil))
 			continue
 		}
-		s.dispatch(conn, req)
+		// 每条消息独立 goroutine 执行：阻塞型 handler（如 handleCall 同步等待插件
+		// 长耗时响应，超时可达 600s）不得堵住本连接的消息循环，否则后续 RPC
+		// （如 renderer 600ms 轮询 plugin.list）全部排队超时。
+		// reply/broadcast 均以 writeMu 串行化写入，并发回复安全。
+		go s.dispatch(conn, req)
 	}
 }
 
@@ -717,17 +721,17 @@ func (s *Server) servePluginUI(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 }
 
-// serveFavicon 返回应用 logo（octpusY.svg）作为新 BrowserWindow 的站点图标。
+// serveFavicon 返回应用 logo（logo128.png）作为新 BrowserWindow 的站点图标。
 func (s *Server) serveFavicon(w http.ResponseWriter, r *http.Request) {
-	f, err := os.Open(filepath.Join(s.resourcesDir, "logo", "octpusY.svg"))
+	f, err := os.Open(filepath.Join(s.resourcesDir, "logo", "logo128.png"))
 	if err != nil {
-		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(http.StatusNoContent) // 无图标文件时返回 204，避免 400/404 噪音
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", "image/svg+xml")
-	http.ServeContent(w, r, "octpusY.svg", time.Time{}, f)
+	w.Header().Set("Content-Type", "image/png")
+	http.ServeContent(w, r, "logo128.png", time.Time{}, f)
 }
 
 // command.list 返回全部可执行命令（FR-9 命令面板），宿主据此补全。

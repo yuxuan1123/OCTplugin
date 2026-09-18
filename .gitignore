@@ -13,6 +13,11 @@ deps/
 store/
 logs/
 runtime/
+# 插件嵌套 store（模型/翻译器运行时配置）
+plugins/*/store/
+# 插件根目录散落的运行时状态
+plugins/*/home_state.json
+plugins/*/*_state.json
 # 本地大体积运行时工具（如 LibreOffice ~1GB + 下载缓存），多插件共享，不进版本库
 tools/
 # 插件运行期缓存（预设/状态/临时产物）
@@ -21,6 +26,13 @@ plugins/*/.cache/
 # 编辑器备份文件
 *~
 *.exe~
+*.bak
+*.tmp
+*.temp
+# 内核/宿主临时调试快照与硬编码 token 的调试脚本
+_*.txt
+_k*fert*
+.tmp_kd*
 
 # ---- Node ----
 node_modules/

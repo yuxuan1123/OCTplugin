@@ -57,11 +57,36 @@ def _norm_ext(path):
 _FFMPEG_CACHE = None
 
 
+def _store_ffmpeg_path():
+    """从本插件 store/models.json 读用户配置的 ffmpeg 路径（宿主「外部地址与内存设置」写入）。"""
+    try:
+        import json
+        _d = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))), "store", "models.json")
+        with open(_d, "r", encoding="utf-8") as f:
+            resources = (json.load(f).get("resources") or {})
+        rec = resources.get("bin.ffmpeg") or {}
+        return (rec.get("path") or "").strip()
+    except Exception:
+        return ""
+
+
+def reset_ffmpeg_cache():
+    """清空 ffmpeg 定位缓存（模型管理改路径后调用）。"""
+    global _FFMPEG_CACHE
+    _FFMPEG_CACHE = None
+
+
 def get_ffmpeg_path():
-    """查找 ffmpeg 可执行文件路径（ui_config.json → 环境变量 → PATH → 常见安装位置）"""
+    """查找 ffmpeg 可执行文件路径（store/models.json → 统一配置 → 环境变量 → PATH → 常见安装位置）"""
     global _FFMPEG_CACHE
     if _FFMPEG_CACHE:
         return _FFMPEG_CACHE
+    # 0) 用户配置（store/models.json 的 bin.ffmpeg，优先）
+    ust = _store_ffmpeg_path()
+    if ust and os.path.exists(ust):
+        _FFMPEG_CACHE = ust
+        return ust
     # 1) 统一配置（config/ui_config.json 的 paths.ffmpeg，允许外置/覆盖）
     cfg = _C.path("ffmpeg")
     if cfg and os.path.exists(cfg):
@@ -253,12 +278,3 @@ def ensure_heif():
         return True
     except ImportError:
         return False
-
-
-def ensure_cairosvg():
-    """返回 cairosvg 模块（SVG 渲染）或 None"""
-    try:
-        import cairosvg
-        return cairosvg
-    except ImportError:
-        return None

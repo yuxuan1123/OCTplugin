@@ -62,6 +62,19 @@ from core.utils.file_handler import file_exists, read_text, write_text, safe_nam
 
 def _ensure_pandoc(log):
     """确保 pandoc 可用，返回其路径。pypandoc 未提供时给出明确提示（由主程序负责）。"""
+    # 用户从「外部地址与内存设置」指定了 pandoc 路径 → 用 PYPANDOC_PANDOC 覆盖
+    try:
+        import json
+        import os as _os
+        _d = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+            _os.path.abspath(__file__)))), "store", "models.json")
+        with open(_d, "r", encoding="utf-8") as _f:
+            rec = (json.load(_f).get("resources") or {}).get("bin.pandoc") or {}
+        _up = (rec.get("path") or "").strip()
+        if _up and _os.path.exists(_up):
+            _os.environ["PYPANDOC_PANDOC"] = _up
+    except Exception:
+        pass
     if pypandoc is None:
         raise RuntimeError(
             "❌ 未检测到 pandoc 支持。该转换依赖 pandoc，"
@@ -85,7 +98,7 @@ def _register_cjk_font():
         return _CJK_FONT_NAME
 
     # Windows 字体目录
-    win_fonts = os.environ.get("WINDIR", r"C:\Windows") + r"\Fonts"
+    win_fonts = os.environ.get("WINDIR", os.path.expandvars(r"%SystemRoot%")) + r"\Fonts"
 
     font_map = {
         "simsun": os.path.join(win_fonts, "simsun.ttc"),      # 宋体 ✅
@@ -104,11 +117,9 @@ def _register_cjk_font():
                 # 不吞异常，方便调试
                 print(f"[WARN] 注册字体失败 {path}: {e}")
 
-    # 实在不行，直接报错，避免生成乱码 PDF
-    raise RuntimeError(
-        "❌ 未找到 Windows 中文字体，无法生成 PDF。"
-        "请确认 C:\\Windows\\Fonts 下有 simsun.ttc 或 msyh.ttc"
-    )
+    # 找不到中文字体：返回 None，由调用方降级为 reportlab 默认字体，
+    # 而不是抛异常使整个 PDF 生成流程崩溃（中文会退化为框格，但流程不中断）。
+    return None
 
 
 def _make_cjk_styles(font_name):

@@ -1,15 +1,15 @@
 """
 OCTools/core/engines/image_engine.py
 ───────────────────────────────────────────────
-图像引擎（核心引擎层）：图像格式互转（Pillow / cairosvg / vtracer）
+图像引擎（核心引擎层）：图像格式互转（Pillow / sharp / vtracer）
 
 覆盖：
-  - 图像 → 图像（Pillow 转码；SVG 走 cairosvg 渲染 / 矢量追踪）
+  - 图像 → 图像（Pillow 转码；SVG 走 sharp 渲染 / 矢量追踪）
   - SVG → PNG 位图（供 图片→文档 等路径复用）
   - 位图 → SVG（优先 vtracer 真矢量追踪，退化 PNG 嵌入）
 
-设计原则：
-  - 每个转换函数签名统一为 (input_path, output_path, log) -> bool
+SVG 渲染由独立 Node 子进程（apps/sharp_worker.js + sharp）承担：仅当真正
+执行 SVG → 位图时才懒启动，零常驻开销；sharp 内置 librsvg，Windows 免系统库。
 """
 # -*- coding: utf-8 -*-
 
@@ -21,11 +21,11 @@ from core.engines.ffmpeg_utils import (
     PIL_FORMATS,
     _log_done,
     _norm_ext,
-    ensure_cairosvg,
     ensure_heif,
     ensure_outdir,
 )
 from core.utils.file_handler import file_exists
+from apps.sharp_client import render_svg as _sharp_render_svg
 
 
 # ════════════════════════════════════════════
@@ -68,7 +68,7 @@ def _save_image(img, output_path, dst, log):
 
 
 def image_to_image(input_path, output_path, log):
-    """图像 → 图像（Pillow 转码；SVG 走 cairosvg 渲染 / 矢量追踪）"""
+    """图像 → 图像（Pillow 转码；SVG 走 sharp 渲染 / 矢量追踪）"""
     if not file_exists(input_path, log): return False
     src = _norm_ext(input_path)
     dst = _norm_ext(output_path)
@@ -80,7 +80,7 @@ def image_to_image(input_path, output_path, log):
     log(f"🖼️ 图像转换: {os.path.basename(input_path)} → {os.path.basename(output_path)}")
     ensure_outdir(output_path)
 
-    # SVG 作为输入：用 cairosvg 渲染成位图
+    # SVG 作为输入：用 sharp 渲染成位图
     if src == "svg":
         return _svg_to_bitmap(input_path, output_path, log, dst)
 
@@ -102,20 +102,16 @@ def image_to_image(input_path, output_path, log):
 
 
 def _svg_to_bitmap(input_path, output_path, log, dst):
-    """SVG → 位图：cairosvg 渲染 PNG 后转目标格式"""
-    cairosvg = ensure_cairosvg()
-    if cairosvg is None:
-        log("❌ SVG 转换需要 cairosvg，请执行: pip install cairosvg")
-        return False
+    """SVG → 位图：sharp 渲染 PNG 后转目标格式（懒启动 Node 子进程）"""
     try:
         if dst == "png":
-            cairosvg.svg2png(url=input_path, write_to=output_path)
+            _sharp_render_svg(input_path, output_path)
             _log_done(output_path, log, kind="图像")
             return True
         # 其他格式：先渲染 PNG，再用 Pillow 转换
         tmp = output_path + ".tmp.png"
         try:
-            cairosvg.svg2png(url=input_path, write_to=tmp)
+            _sharp_render_svg(input_path, tmp)
             img = Image.open(tmp)
             img.load()
             _save_image(img, output_path, dst, log)
@@ -131,13 +127,9 @@ def _svg_to_bitmap(input_path, output_path, log, dst):
 
 
 def svg_to_png(input_path, output_path, log):
-    """SVG → PNG 位图（cairosvg 渲染；供 图片→文档 等路径复用）"""
-    cairosvg = ensure_cairosvg()
-    if cairosvg is None:
-        log("❌ SVG 转换需要 cairosvg，请执行: pip install cairosvg")
-        return False
+    """SVG → PNG 位图（sharp 渲染；供 图片→文档 等路径复用）"""
     try:
-        cairosvg.svg2png(url=input_path, write_to=output_path)
+        _sharp_render_svg(input_path, output_path)
         if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
             return True
         return False

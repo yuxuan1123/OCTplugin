@@ -283,6 +283,28 @@ def _synth_moss(text, wav_path, cfg, log):
     return bool(result.get("audio_path")) and os.path.exists(wav_path)
 
 
+def _touch_tts(engine: str = ""):
+    """重置 TTS 引擎闲置计时（模型管理用空闲回收），并按下 store 策略自注册。engine 缺省取当前配置引擎。"""
+    try:
+        from core.idle_manager import get_manager
+        from resources import register_engine
+        key = "moss" if engine == "moss" else "kokoro"
+        register_engine(key, release)
+        get_manager().touch(key)
+    except Exception:
+        pass
+
+
+def release():
+    """释放已加载的 TTS 引擎缓存（Kokoro KPipeline + MOSS OnnxTtsRuntime），并 gc.collect()。"""
+    global _MOSS_RT, _MOSS_RT_MODEL
+    import gc
+    _KOKORO_PIPES.clear()
+    _MOSS_RT = None
+    _MOSS_RT_MODEL = None
+    gc.collect()
+
+
 # ════════════════════════════════════════════
 #  统一入口
 # ════════════════════════════════════════════
@@ -290,6 +312,7 @@ def _synth_moss(text, wav_path, cfg, log):
 def synthesize_text_to_audio(text, output_path, log=lambda m: print(m), config=None):
     """把文本合成为音频文件（目标格式由 output_path 扩展名决定）"""
     cfg = config or default_config()
+    _touch_tts(cfg.engine)
     text = str(text or "").strip()
     if not text:
         log("❌ 文本为空，无法合成")

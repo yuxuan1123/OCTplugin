@@ -2,7 +2,7 @@
 //   1) 拉起 Go 内核 daemon（./kernel/kerneld.exe）
 //   2) 从内核 stdout 读首个 auth 行 {port, token}
 //   3) WebSocket 连接 localhost:port，首条消息发带 token 的 kernel.hello
-//   4) 调 plugin.call → demo_hello.hello，结果在窗口显示。
+//   4) 调 plugin.list → 结果在窗口显示。
 
 const { app, BrowserWindow, dialog, ipcMain, globalShortcut, Tray, Menu, nativeImage } = require("electron");
 const { spawn } = require("child_process");
@@ -12,7 +12,7 @@ const path = require("path");
 const WebSocket = require("ws");
 
 const KERNEL_EXE = path.join(__dirname, "..", "kernel", "kerneld.exe");
-const APP_LOGO = path.join(__dirname, "..", "resources", "logo", "octpusY.svg");
+const APP_LOGO = path.join(__dirname, "..", "resources", "logo", "logo128.png");
 const TRAY_ICON = path.join(__dirname, "..", "resources", "icons", "logo16.png");
 const TRAY_ICON_2X = path.join(__dirname, "..", "resources", "icons", "logo32.png");
 
@@ -22,6 +22,9 @@ let kernelProc = null;
 let tray = null;
 let seq = 0;
 let kernelAuth = null; // 内核地址/token，供新开插件子窗口复用
+
+// 给宿主主进程一个可辨认的标题（任务管理器/进程列表里更容易区分）
+process.title = "OCTplugin · 墨韵工作台";
 
 // 插件请求以独立窗口打开页面（如 md 编辑器）。宿主把内核地址放查询参数，
 // 子页 app.js 见 ?mdEditor=1&kport=&auth= 时自连内核 WS。
@@ -72,7 +75,7 @@ function showMain() {
   win.show(); win.focus();
 }
 function setupTray() {
-  // 托盘图标优先用 octpusY.svg；若 SVG 无法解码（空图像）则回退 PNG
+  // 托盘图标用 logo128.png（与窗口/顶栏同款 logo）；异常则回退小尺寸 PNG
   let img = null;
   try { img = nativeImage.createFromPath(APP_LOGO); } catch (e) { img = null; }
   if (!img || img.isEmpty()) img = nativeImage.createFromPath(fs.existsSync(TRAY_ICON) ? TRAY_ICON : TRAY_ICON_2X);
@@ -122,12 +125,8 @@ async function bootstrap() {
     kernelAuth = auth; // 供后续创建插件子窗口（md 编辑器等）复用端口/token
     await connect(auth);
     const list = await rpc("plugin.list", {});
-    // 演示调用：demo_hello 可能被用户设为 disabled/lazy 或移除。失败不应阻断 UI 启动。
-    let details = null, hello = null;
-    try { details = await rpc("plugin.details", { pluginId: "demo_hello" }); } catch (e) {}
-    try { hello = await rpc("plugin.call", { pluginId: "demo_hello", method: "hello", params: { name: "OCTplugin" } }); } catch (e) {}
     win.webContents.send("kernel:ready", {
-      list, hello, details,
+      list,
       kernelBase: `http://127.0.0.1:${auth.port}/`,
       resBase: `http://127.0.0.1:${auth.port}/res/`,
       port: auth.port, token: auth.token,
@@ -159,6 +158,54 @@ ipcMain.handle("dialog:pickFile", async (e, filters) => {
   });
   if (canceled || !filePaths.length) return { canceled: true };
   return { canceled: false, path: filePaths[0] };
+});
+
+// ── 外部地址与内存设置：扫描各插件静态 manifest（不依赖插件进程是否在线）──
+const PLUGINS_ROOT = path.join(__dirname, "..", "plugins");
+const LOAD_DEF = "lazy", UNLOAD_DEF = "idle", IDLE_MIN_DEF = 10;
+function readJsonSafe(p, fallback) {
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return fallback; }
+}
+ipcMain.handle("res:scan", async () => {
+  const groups = [];
+  if (!fs.existsSync(PLUGINS_ROOT)) return { groups };
+  const dirs = fs.readdirSync(PLUGINS_ROOT, { withFileTypes: true }).filter(d => d.isDirectory());
+  for (const d of dirs) {
+    const pid = d.name;
+    const mf = path.join(PLUGINS_ROOT, pid, "resources", "manifest.json");
+    if (!fs.existsSync(mf)) continue;
+    const manifest = readJsonSafe(mf, []);
+    const saved = readJsonSafe(path.join(PLUGINS_ROOT, pid, "store", "models.json"), {});
+    const resources = saved.resources || {};
+    for (const m of manifest) {
+      const rec = resources[m.key] || {};
+      groups.push({
+        pid, key: m.key, label: m.label || m.key, type: m.type || "model",
+        variant: m.variant || "", path: rec.path || "", load: rec.load || LOAD_DEF,
+        unload: rec.unload || UNLOAD_DEF, idle_min: rec.idle_min || IDLE_MIN_DEF,
+      });
+    }
+  }
+  return { groups };
+});
+ipcMain.handle("res:set", async (e, { pid, item } = {}) => {
+  if (!pid || !item || !item.key) return { ok: false, error: "缺少 pid / item.key" };
+  const storeFile = path.join(PLUGINS_ROOT, pid, "store", "models.json");
+  const data = readJsonSafe(storeFile, {});
+  data.resources = data.resources || {};
+  data.resources[item.key] = {
+    path: item.path || "", load: item.load || LOAD_DEF,
+    unload: item.unload || UNLOAD_DEF,
+    idle_min: (item.idle_min === undefined || item.idle_min === null || item.idle_min === "")
+      ? IDLE_MIN_DEF : Math.max(1, parseInt(item.idle_min, 10) || IDLE_MIN_DEF),
+  };
+  try {
+    fs.mkdirSync(path.dirname(storeFile), { recursive: true });
+    fs.writeFileSync(storeFile, JSON.stringify(data, null, 2), "utf8");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
 });
 
 // 定位 uv：优先显式 OCTRUN_UV → PATH（where uv）→ 常见安装目录。

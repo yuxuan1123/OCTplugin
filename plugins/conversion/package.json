@@ -1,0 +1,9 @@
+{
+  "name": "conversion-sharp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "conversion 插件的 sharp 渲染子进程依赖",
+  "dependencies": {
+    "sharp": "^0.33.5"
+  }
+}

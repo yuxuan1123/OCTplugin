@@ -20,7 +20,14 @@ translation/core/engines/audio_capture_engine.py
 import threading
 import wave
 
-import numpy as np
+# numpy 惰性守卫：依赖未装时模块也能被 import（插件照常启动），
+# 真录音/转采样时再报清晰中文错误，而不是在启动阶段崩溃。
+try:
+    import numpy as np
+    _NUMPY_READY = True
+except Exception:
+    np = None
+    _NUMPY_READY = False
 
 VOICE_TARGET_RATE = 16000
 
@@ -61,6 +68,8 @@ def default_loopback_device():
 
 def to_16k_mono(rate: int, channels: int, data: bytes) -> bytes:
     """把任意采样率 / 声道数的 int16 PCM 下混 + 重采样为 16kHz 单声道"""
+    if not _NUMPY_READY:
+        raise RuntimeError("语音功能缺少依赖（numpy），请在设置中确认依赖已安装")
     rate = int(rate) if rate else 48000
     channels = max(1, int(channels or 1))
     a = np.frombuffer(data, dtype=np.int16)

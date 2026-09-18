@@ -4,7 +4,7 @@ OCTools/core/engines/__init__.py
 核心引擎层：各类格式与算法的底层能力封装。
 
 按能力拆分的引擎文件：
-  - image_engine.py          图像格式互转（Pillow / cairosvg）
+  - image_engine.py          图像格式互转（Pillow / sharp 子进程）
   - audio_engine.py          音频解码、编码、重采样（ffmpeg）
   - video_engine.py          视频格式转换与封装（ffmpeg）
   - document_engine.py       文本类文档处理（docx / pdf / md / txt / rtf / wps）

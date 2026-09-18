@@ -1,0 +1,6 @@
+[
+  {"key": "opusmt", "label": "Opus-MT（轻量翻译）", "type": "model"},
+  {"key": "hymt2", "label": "Hy-MT2-1.8B（本地大模型）", "type": "model"},
+  {"key": "paddle", "label": "PaddleOCR（屏幕识别）", "type": "model"},
+  {"key": "stt", "label": "SenseVoice 语音识别", "type": "model"}
+]

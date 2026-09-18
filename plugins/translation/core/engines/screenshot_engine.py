@@ -10,15 +10,30 @@ translation/core/engines/screenshot_engine.py
 
 # -*- coding: utf-8 -*-
 
-import mss
-from PIL import Image
+# 重依赖惰性守卫：依赖未装时模块也能被 import（插件照常启动），
+# 真用到截图时再报清晰中文错误，而不是在启动阶段崩溃。
+try:
+    import mss
+    from PIL import Image
+    _SCREENSHOT_READY = True
+except Exception:
+    mss = None
+    Image = None
+    _SCREENSHOT_READY = False
 
 # 截屏前隐藏悬浮窗后，等待桌面合成器刷新（秒）
 CAPTURE_EXCLUDE_DELAY = 0.06
 
 
+def _require_ready():
+    if not _SCREENSHOT_READY:
+        raise RuntimeError("截图功能缺少依赖（mss / Pillow），请在设置中确认依赖已安装")
+    return True
+
+
 def _monitors():
     """返回所有显示器几何列表（mss 坐标：左/上/宽/高）。"""
+    _require_ready()
     with mss.mss() as sct:
         return list(sct.monitors)
 

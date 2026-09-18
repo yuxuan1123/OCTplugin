@@ -19,6 +19,7 @@ except Exception:
 
 import os
 import json
+import atexit
 
 from core import formats as FMT
 from services.conversion import (
@@ -26,6 +27,13 @@ from services.conversion import (
     reachable_targets,
 )
 from services.conversion import batch as _batch
+
+# 插件进程退出时关闭 sharp 渲染子进程，防止孤儿 node 进程
+try:
+    from apps.sharp_client import close_sharp
+    atexit.register(close_sharp)
+except Exception:
+    pass
 
 
 # 最多保留日志行数（避免超长响应撑爆 8MB）
@@ -175,6 +183,14 @@ def handle(req_id, method, params):
         if ok:
             log(f"✅ 转换成功: {output_path}")
         return {"ok": ok, "log": log.truncated(), "done": True}
+
+    if method == "conversion.resources.status":
+        from resources import models_status
+        return models_status(None)
+
+    if method == "conversion.resources.set":
+        from resources import models_set
+        return models_set(None, (params or {}).get("item") or (params or {}))
 
     if method == "conversion.libreoffice_status":
         from core.engines import libreoffice_runtime as _LO

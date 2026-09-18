@@ -4,8 +4,7 @@
   "description": "OCTplugin Electron 宿主（MVP：拉起 Go 内核 + WS 连接）",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "smoke": "node smoke.js"
+    "start": "electron ."
   },
   "devDependencies": {
     "electron": "^31.0.0"
