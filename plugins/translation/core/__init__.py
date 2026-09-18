@@ -1,0 +1,1 @@
+"""translation 插件 · core"""

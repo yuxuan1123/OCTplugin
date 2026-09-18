@@ -48,3 +48,4 @@ Thumbs.db
 # ---- 工具 / 环境偏移 ----
 .env
 .local
+plugins/conversion/hub/
